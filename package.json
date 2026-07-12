@@ -3,16 +3,26 @@
   "version": "0.0.1",
   "type": "module",
   "private": true,
+  "packageManager": "bun@1.3.5",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dev:up": "supabase start && docker compose up -d",
+    "dev:down": "docker compose down && supabase stop",
+    "dev:reset": "docker compose down -v && supabase stop && supabase start && docker compose up -d",
+    "dev:status": "supabase status && docker compose ps",
+    "redis:up": "docker compose up -d",
+    "redis:down": "docker compose down",
+    "redis:logs": "docker compose logs -f"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
+    "@supabase/ssr": "^0.12.0",
+    "@supabase/supabase-js": "^2.110.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.24.0",
