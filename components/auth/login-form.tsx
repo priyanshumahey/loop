@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
+import { GoogleSignInButton } from '@/components/auth/google-sign-in-button'
 import {
   Card,
   CardContent,
@@ -88,6 +89,12 @@ export function LoginForm({ className, ...props }: React.ComponentPropsWithoutRe
               <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading ? 'Logging in...' : 'Login'}
               </Button>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <div className="h-px flex-1 bg-border" />
+                Or
+                <div className="h-px flex-1 bg-border" />
+              </div>
+              <GoogleSignInButton />
             </div>
             <div className="mt-4 text-center text-sm">
               Don&apos;t have an account?{' '}
