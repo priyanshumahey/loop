@@ -20,7 +20,7 @@ export default async function Page() {
         </span>
         <h1 className="font-heading text-6xl font-bold tracking-tight sm:text-7xl">Loop</h1>
         <p className="max-w-xs text-muted-foreground">
-          Your calendar and inbox, on autopilot.
+          Your calendar, on autopilot.
         </p>
       </div>
 
