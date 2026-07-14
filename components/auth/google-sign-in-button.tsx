@@ -8,7 +8,8 @@ import { Button } from '@/components/ui/button'
 const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.send',
-  'https://www.googleapis.com/auth/calendar.readonly',
+  // Read/write access so loop can sync calendar events both ways.
+  'https://www.googleapis.com/auth/calendar.events',
 ].join(' ')
 
 function GoogleIcon({ className }: { className?: string }) {
