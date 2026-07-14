@@ -2,6 +2,9 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* Let Tailwind scan streamdown so its markdown classes are generated. */
+@source "../node_modules/streamdown/dist/index.js";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -41,6 +44,13 @@
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
+    --color-surface: var(--card);
+    --color-on-surface: var(--foreground);
+    --color-on-surface-variant: var(--muted-foreground);
+    --color-surface-container: var(--muted);
+    --color-surface-container-high: var(--muted);
+    --color-surface-container-higher: var(--accent);
+    --color-surface-container-highest: var(--accent);
     --radius-sm: calc(var(--radius) * 0.6);
     --radius-md: calc(var(--radius) * 0.8);
     --radius-lg: var(--radius);
@@ -170,4 +180,63 @@
   box-shadow:
     0 1px 2px rgba(16, 24, 40, 0.04),
     0 12px 32px -12px rgba(16, 24, 40, 0.16);
+}
+
+/* Vertical rhythm for assistant markdown rendered by streamdown. */
+.loop-markdown > :first-child {
+  margin-top: 0;
+}
+.loop-markdown > :last-child {
+  margin-bottom: 0;
+}
+.loop-markdown p,
+.loop-markdown ul,
+.loop-markdown ol,
+.loop-markdown pre,
+.loop-markdown blockquote,
+.loop-markdown table {
+  margin-block: 0.5rem;
+}
+.loop-markdown h1,
+.loop-markdown h2,
+.loop-markdown h3,
+.loop-markdown h4 {
+  margin-block: 0.75rem 0.375rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.loop-markdown h1 { font-size: 1.25rem; }
+.loop-markdown h2 { font-size: 1.125rem; }
+.loop-markdown h3 { font-size: 1rem; }
+.loop-markdown ul { list-style: disc; padding-left: 1.25rem; }
+.loop-markdown ol { list-style: decimal; padding-left: 1.25rem; }
+.loop-markdown li { margin-block: 0.125rem; }
+.loop-markdown a { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
+.loop-markdown code {
+  border-radius: 0.25rem;
+  background: var(--muted);
+  padding: 0.1rem 0.3rem;
+  font-size: 0.875em;
+}
+.loop-markdown pre {
+  overflow-x: auto;
+  border-radius: 0.5rem;
+  background: var(--muted);
+  padding: 0.75rem 0.875rem;
+}
+.loop-markdown pre code {
+  background: transparent;
+  padding: 0;
+}
+.loop-markdown blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 0.75rem;
+  color: var(--muted-foreground);
+}
+.loop-markdown table { width: 100%; border-collapse: collapse; }
+.loop-markdown th,
+.loop-markdown td {
+  border: 1px solid var(--border);
+  padding: 0.375rem 0.5rem;
+  text-align: left;
 }
