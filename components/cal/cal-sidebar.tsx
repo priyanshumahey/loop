@@ -15,6 +15,7 @@ import { useMemo } from "react"
 
 import type { CalendarEvent, EventColor } from "@/components/event-calendar/types"
 import { LoopMark } from "@/components/loop-logo"
+import { SidebarCalendar } from "@/components/cal/sidebar-calendar"
 import { UserAccount } from "@/components/user-account"
 import { usePersistentState } from "@/hooks/use-persistent-state"
 import { cn } from "@/lib/utils"
@@ -98,13 +99,17 @@ function Section({
 }
 
 export function CalSidebar({
+  currentDate,
   todayEvents,
   recentEvents,
+  onDateChange,
   onNewEvent,
   onOpenEvent,
 }: {
+  currentDate: Date
   todayEvents: CalendarEvent[]
   recentEvents: CalendarEvent[]
+  onDateChange: (date: Date) => void
   onNewEvent: () => void
   onOpenEvent: (event: CalendarEvent) => void
 }) {
@@ -214,8 +219,14 @@ export function CalSidebar({
         New event
       </button>
 
+      <SidebarCalendar
+        selected={currentDate}
+        onSelect={onDateChange}
+        className="mt-2"
+      />
+
       {/* Sections */}
-      <div className="-mx-1 mt-2 min-h-0 flex-1 overflow-y-auto px-1">
+      <div className="-mx-1 mt-2 min-h-0 flex-1 overflow-y-auto border-t border-border/60 px-1 pt-2">
         <Section
           icon={<ClockIcon className="size-3.5" />}
           label="Recently opened"

@@ -63,6 +63,8 @@ function toAgentEvent(e: CalendarEvent): AgentEvent {
     location: e.location ?? null,
     description: e.description ?? null,
     color: e.color ?? null,
+    recurringEventId: e.recurringEventId ?? null,
+    originalStart: e.originalStart ?? null,
   }
 }
 

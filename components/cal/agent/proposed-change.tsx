@@ -10,7 +10,12 @@ import {
 } from "lucide-react"
 
 import { EventTooltip } from "@/components/event-calendar/event-tooltip"
-import type { CalendarEvent, EventColor } from "@/components/event-calendar/types"
+import type {
+  CalendarEvent,
+  EventColor,
+  EventRecurrence,
+  RecurrenceScope,
+} from "@/components/event-calendar/types"
 import type { AgentEvent } from "@/lib/cal-agent/tools"
 import { cn } from "@/lib/utils"
 
@@ -41,6 +46,7 @@ function toCalendarEvent(event: AgentEvent): CalendarEvent {
 }
 
 interface WriteInput {
+  eventTitle?: string
   title?: string
   start?: string
   end?: string
@@ -48,6 +54,8 @@ interface WriteInput {
   location?: string
   eventId?: string
   color?: string
+  recurrence?: EventRecurrence
+  recurrenceScope?: RecurrenceScope
 }
 
 interface WriteOutput {
@@ -78,6 +86,29 @@ const META: Record<
 }
 
 const isValidDate = (d: Date) => !Number.isNaN(d.getTime())
+
+function formatRecurrence(input: WriteInput): string | null {
+  if (input.recurrenceScope === "series") return "All events in the series"
+  if (input.recurrenceScope === "following") return "This and following events"
+  if (input.recurrenceScope === "single") return "This event only"
+  if (!input.recurrence) return null
+
+  const frequency =
+    input.recurrence.frequency === "daily"
+      ? "Daily"
+      : input.recurrence.frequency === "weekly"
+        ? "Weekly"
+        : input.recurrence.frequency === "monthly"
+          ? "Monthly"
+          : "Yearly"
+  if (input.recurrence.ends === "after" && input.recurrence.count) {
+    return `${frequency} · ${input.recurrence.count} events`
+  }
+  if (input.recurrence.ends === "on" && input.recurrence.until) {
+    return `${frequency} · through ${input.recurrence.until}`
+  }
+  return frequency
+}
 
 function formatRange(input: WriteInput): string | null {
   if (!input.start) return null
@@ -119,7 +150,9 @@ export function ProposedChange({
 }) {
   const meta = META[action]
   const range = formatRange(input)
-  const title = input.title ?? output?.event?.title ?? "(event)"
+  const recurrence = formatRecurrence(input)
+  const title =
+    input.title ?? input.eventTitle ?? output?.event?.title ?? "(event)"
 
   // Terminal outcomes.
   if (state === "output-denied") {
@@ -179,10 +212,17 @@ export function ProposedChange({
           {title}
         </div>
         {range && (
-          <div className="text-[12px] tabular-nums text-muted-foreground">{range}</div>
+          <div className="text-[12px] text-muted-foreground tabular-nums">
+            {range}
+          </div>
+        )}
+        {recurrence && (
+          <div className="text-[12px] text-muted-foreground">{recurrence}</div>
         )}
         {input.location && (
-          <div className="text-[12px] text-muted-foreground/80">{input.location}</div>
+          <div className="text-[12px] text-muted-foreground/80">
+            {input.location}
+          </div>
         )}
       </div>
 
@@ -254,7 +294,7 @@ function EventLink({
       <button
         type="button"
         onClick={() => onOpen?.(event)}
-        className="min-w-0 truncate rounded font-medium text-foreground underline decoration-dotted decoration-foreground/40 underline-offset-2 transition-colors hover:text-emerald-600 hover:decoration-solid dark:hover:text-emerald-400"
+        className="min-w-0 truncate rounded font-medium text-foreground underline decoration-foreground/40 decoration-dotted underline-offset-2 transition-colors hover:text-emerald-600 hover:decoration-solid dark:hover:text-emerald-400"
       >
         {event.title}
       </button>

@@ -261,7 +261,10 @@ export function DayView({
 
   return (
     <div className="flex flex-col h-full overflow-hidden" data-slot="day-view">
-      <div className="flex-1 overflow-auto" ref={scrollContainerRef}>
+      <div
+        className="flex-1 overflow-auto overscroll-none"
+        ref={scrollContainerRef}
+      >
         {/* Sticky all-day section */}
         {showAllDaySection && (
           <div className="sticky top-0 z-30 border-border/70 border-t bg-background">

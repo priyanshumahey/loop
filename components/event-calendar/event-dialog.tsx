@@ -7,15 +7,18 @@ import {
   RiErrorWarningLine,
   RiExpandDiagonalLine,
   RiMapPinLine,
+  RiRepeat2Line,
   RiTimeLine,
 } from "@remixicon/react";
-import { format, isBefore } from "date-fns";
+import { addMonths, format, isBefore } from "date-fns";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   CalendarEvent,
   EventColor,
+  EventRecurrence,
+  RecurrenceScope,
 } from "@/components/event-calendar/types";
 import {
   DefaultEndHour,
@@ -54,8 +57,28 @@ interface EventDialogProps {
   event: CalendarEvent | null;
   isOpen: boolean;
   onClose: () => void;
-  onSave: (event: CalendarEvent) => void;
-  onDelete: (eventId: string) => void;
+  onSave: (event: CalendarEvent, recurrenceScope: RecurrenceScope) => void;
+  onDelete: (eventId: string, recurrenceScope: RecurrenceScope) => void;
+  canCreateRecurringEvents?: boolean;
+}
+
+type RepeatPreset =
+  | "none"
+  | "daily"
+  | "weekdays"
+  | "weekly"
+  | "monthly"
+  | "yearly";
+
+function presetForRecurrence(recurrence?: EventRecurrence): RepeatPreset {
+  if (!recurrence) return "none";
+  if (
+    recurrence.frequency === "weekly" &&
+    recurrence.byWeekday?.join(",") === "1,2,3,4,5"
+  ) {
+    return "weekdays";
+  }
+  return recurrence.frequency;
 }
 
 export function EventDialog({
@@ -64,6 +87,7 @@ export function EventDialog({
   onClose,
   onSave,
   onDelete,
+  canCreateRecurringEvents = true,
 }: EventDialogProps) {
   const router = useRouter();
   const [title, setTitle] = useState("");
@@ -75,6 +99,16 @@ export function EventDialog({
   const [allDay, setAllDay] = useState(false);
   const [location, setLocation] = useState("");
   const [color, setColor] = useState<EventColor>("sky");
+  const [repeat, setRepeat] = useState<RepeatPreset>("none");
+  const [recurrenceEnds, setRecurrenceEnds] =
+    useState<NonNullable<EventRecurrence["ends"]>>("never");
+  const [recurrenceUntil, setRecurrenceUntil] = useState(() =>
+    format(addMonths(new Date(), 3), "yyyy-MM-dd"),
+  );
+  const [recurrenceCount, setRecurrenceCount] = useState(10);
+  const [recurrenceScope, setRecurrenceScope] =
+    useState<RecurrenceScope>("single");
+  const [recurrenceDirty, setRecurrenceDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [startDateOpen, setStartDateOpen] = useState(false);
   const [endDateOpen, setEndDateOpen] = useState(false);
@@ -99,6 +133,12 @@ export function EventDialog({
     setAllDay(false);
     setLocation("");
     setColor("sky");
+    setRepeat("none");
+    setRecurrenceEnds("never");
+    setRecurrenceUntil(format(addMonths(new Date(), 3), "yyyy-MM-dd"));
+    setRecurrenceCount(10);
+    setRecurrenceScope("single");
+    setRecurrenceDirty(false);
     setError(null);
   }, []);
 
@@ -123,6 +163,15 @@ export function EventDialog({
       setAllDay(event.allDay || false);
       setLocation(event.location || "");
       setColor((event.color as EventColor) || "sky");
+      setRepeat(presetForRecurrence(event.recurrence));
+      setRecurrenceEnds(event.recurrence?.ends ?? "never");
+      setRecurrenceUntil(
+        event.recurrence?.until ??
+          format(addMonths(start, 3), "yyyy-MM-dd"),
+      );
+      setRecurrenceCount(event.recurrence?.count ?? 10);
+      setRecurrenceScope("single");
+      setRecurrenceDirty(false);
       setError(null); // Reset error when opening dialog
     } else {
       resetForm();
@@ -189,6 +238,41 @@ export function EventDialog({
     // Use generic title if empty
     const eventTitle = title.trim() ? title : "(no title)";
 
+    const buildRecurrence = (): EventRecurrence | undefined => {
+      if (repeat === "none") return undefined;
+      const frequency = repeat === "weekdays" ? "weekly" : repeat;
+      return {
+        frequency,
+        byWeekday:
+          repeat === "weekdays"
+            ? [1, 2, 3, 4, 5]
+            : repeat === "weekly"
+              ? [start.getDay()]
+              : undefined,
+        ends: recurrenceEnds,
+        until: recurrenceEnds === "on" ? recurrenceUntil : undefined,
+        count: recurrenceEnds === "after" ? recurrenceCount : undefined,
+      };
+    };
+
+    // New event: rule from the form. Existing series edited with "All events":
+    // allow changing the rule. Otherwise keep the event's existing rule.
+    let recurrence: EventRecurrence | undefined;
+    if (!event?.id) {
+      recurrence = buildRecurrence();
+    } else if (event.recurringEventId && recurrenceScope === "series") {
+      const built = recurrenceDirty ? buildRecurrence() : undefined;
+      const preservedInterval =
+        built?.frequency === event.recurrence?.frequency
+          ? event.recurrence?.interval
+          : undefined;
+      recurrence = built
+        ? { ...built, interval: preservedInterval }
+        : event.recurrence;
+    } else {
+      recurrence = event.recurrence;
+    }
+
     onSave({
       allDay,
       color,
@@ -196,14 +280,19 @@ export function EventDialog({
       end,
       id: event?.id || "",
       location,
+      recurrence,
+      recurringEventId: event?.recurringEventId,
+      originalStart: event?.originalStart,
       start,
       title: eventTitle,
-    });
+      timezone:
+        event?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }, recurrenceScope);
   };
 
   const handleDelete = () => {
     if (event?.id) {
-      onDelete(event.id);
+      onDelete(event.id, recurrenceScope);
     }
   };
 
@@ -373,6 +462,149 @@ export function EventDialog({
                     onChange={setEndTime}
                     options={timeOptions}
                   />
+                )}
+              </div>
+            </Row>
+
+            {/* Recurrence */}
+            <Row icon={<RiRepeat2Line className="size-5" aria-hidden />}>
+              <div className="flex w-full flex-col gap-2">
+                {event?.recurringEventId && (
+                  <Select
+                    onValueChange={(value: RecurrenceScope) =>
+                      setRecurrenceScope(value)
+                    }
+                    value={recurrenceScope}
+                  >
+                    <SelectTrigger
+                      aria-label="Apply recurring event changes to"
+                      className="w-full border-0 bg-transparent shadow-none hover:bg-surface-container/60 data-[state=open]:bg-surface-container/60"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="single">This event</SelectItem>
+                        {!event.recurrence?.readOnly && (
+                          <SelectItem value="following">
+                            This and following events
+                          </SelectItem>
+                        )}
+                      <SelectItem value="series">All events</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+
+                {/* Repeat rule: shown for new events, and when editing an
+                    existing series (All events) so the rule itself is editable. */}
+                {(!event?.recurringEventId || recurrenceScope === "series") && (
+                  <div className="flex w-full flex-col gap-2">
+                    {event?.recurrence?.readOnly ? (
+                      <div className="rounded-lg px-2 py-2 text-sm text-on-surface-variant">
+                        Custom recurrence · edit the repeat rule in Google Calendar
+                      </div>
+                    ) : (
+                      <Select
+                        disabled={!canCreateRecurringEvents}
+                        onValueChange={(value: RepeatPreset) => {
+                          setRepeat(value);
+                          setRecurrenceDirty(true);
+                        }}
+                        value={repeat}
+                      >
+                      <SelectTrigger
+                        aria-label="Repeat"
+                        title={
+                          canCreateRecurringEvents
+                            ? undefined
+                            : "Connect Google Calendar to create recurring events"
+                        }
+                        className="w-full border-0 bg-transparent shadow-none hover:bg-surface-container/60 data-[state=open]:bg-surface-container/60"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {!event?.recurringEventId && (
+                          <SelectItem value="none">Does not repeat</SelectItem>
+                        )}
+                        <SelectItem value="daily">Every day</SelectItem>
+                        <SelectItem value="weekdays">Every weekday</SelectItem>
+                        <SelectItem value="weekly">
+                          Every week on {format(startDate, "EEEE")}
+                        </SelectItem>
+                        <SelectItem value="monthly">
+                          Every month on day {format(startDate, "d")}
+                        </SelectItem>
+                        <SelectItem value="yearly">
+                          Every year on {format(startDate, "MMMM d")}
+                        </SelectItem>
+                      </SelectContent>
+                      </Select>
+                    )}
+
+                    {!event?.recurrence?.readOnly && repeat !== "none" && (
+                      <div className="flex items-center gap-2 px-2">
+                        <Select
+                          onValueChange={(
+                            value: NonNullable<EventRecurrence["ends"]>,
+                          ) => {
+                            setRecurrenceEnds(value);
+                            setRecurrenceDirty(true);
+                          }}
+                          value={recurrenceEnds}
+                        >
+                          <SelectTrigger
+                            aria-label="Recurrence end"
+                            className="w-[112px]"
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="never">Never ends</SelectItem>
+                            <SelectItem value="on">Ends on</SelectItem>
+                            <SelectItem value="after">Ends after</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {recurrenceEnds === "on" && (
+                          <input
+                            aria-label="Recurrence end date"
+                            className="h-9 min-w-0 flex-1 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            min={format(startDate, "yyyy-MM-dd")}
+                            onChange={(event) =>
+                              {
+                                setRecurrenceUntil(event.target.value);
+                                setRecurrenceDirty(true);
+                              }
+                            }
+                            type="date"
+                            value={recurrenceUntil}
+                          />
+                        )}
+                        {recurrenceEnds === "after" && (
+                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                            <input
+                              aria-label="Number of occurrences"
+                              className="h-9 w-20 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              max={999}
+                              min={1}
+                              onChange={(event) =>
+                                {
+                                  setRecurrenceCount(
+                                    Math.max(1, Number(event.target.value) || 1),
+                                  );
+                                  setRecurrenceDirty(true);
+                                }
+                              }
+                              type="number"
+                              value={recurrenceCount}
+                            />
+                            <span className="text-sm text-on-surface-variant">
+                              events
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </Row>

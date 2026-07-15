@@ -100,9 +100,6 @@ export function ChatInput({
           )}
         </div>
       </div>
-      <p className="mt-2 text-center text-[11px] text-muted-foreground/70">
-        Loop can make mistakes. Check important info.
-      </p>
     </div>
   )
 }

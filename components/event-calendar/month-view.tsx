@@ -149,7 +149,7 @@ export function MonthView({
 
   return (
     <div className="flex flex-col h-full overflow-hidden" data-slot="month-view">
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto overscroll-none">
         {/* Sticky weekday header */}
         <div className="sticky top-0 z-30 grid grid-cols-7 border-border/70 border-b bg-background">
           {weekdays.map((day) => (

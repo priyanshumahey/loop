@@ -1,5 +1,10 @@
-import { addDays, format, parseISO } from 'date-fns'
 import { google, type calendar_v3 } from 'googleapis'
+
+import {
+  addCalendarDays,
+  calendarDateToUtc,
+  dateInTimeZone,
+} from '@/lib/recurrence'
 
 const SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
@@ -45,7 +50,11 @@ export type RefreshedTokens = { accessToken: string; expiryDate: number }
  */
 export type GoogleEvent = {
   googleEventId: string
+  recurringEventId: string | null
+  originalStart: string | null
+  recurrence: string[] | null
   etag: string | null
+  updated: string | null // RFC3339 last-modification time
   status: string | null // 'confirmed' | 'tentative' | 'cancelled'
   title: string
   description: string | null
@@ -65,6 +74,7 @@ export type GoogleEventInput = {
   allDay: boolean
   location?: string | null
   timezone?: string | null
+  recurrence?: string[]
 }
 
 type Result<T> = T & { refreshed?: RefreshedTokens }
@@ -90,8 +100,12 @@ function makeClient(tokens: CalendarTokens) {
   return { client, captured }
 }
 
-function mapGoogleEvent(e: calendar_v3.Schema$Event): GoogleEvent {
+function mapGoogleEvent(
+  e: calendar_v3.Schema$Event,
+  calendarTimeZone = 'UTC'
+): GoogleEvent {
   const isAllDay = Boolean(e.start?.date && !e.start?.dateTime)
+  const timeZone = e.start?.timeZone ?? e.end?.timeZone ?? calendarTimeZone
 
   let start: string | null = e.start?.dateTime ?? null
   let end: string | null = e.end?.dateTime ?? null
@@ -100,15 +114,25 @@ function mapGoogleEvent(e: calendar_v3.Schema$Event): GoogleEvent {
     // Google all-day dates are 'YYYY-MM-DD' with an EXCLUSIVE end date. Convert
     // to local midnight and pull the end back one day so it is inclusive, which
     // is what the calendar UI (isSameDay on end) expects.
-    start = e.start?.date ? `${e.start.date}T00:00:00` : null
+    start = e.start?.date
+      ? calendarDateToUtc(e.start.date, timeZone).toISOString()
+      : null
     end = e.end?.date
-      ? `${format(addDays(parseISO(`${e.end.date}T00:00:00`), -1), 'yyyy-MM-dd')}T00:00:00`
+      ? calendarDateToUtc(
+          addCalendarDays(e.end.date, -1),
+          timeZone
+        ).toISOString()
       : null
   }
 
   return {
     googleEventId: e.id ?? '',
+    recurringEventId: e.recurringEventId ?? null,
+    originalStart:
+      e.originalStartTime?.dateTime ?? e.originalStartTime?.date ?? null,
+    recurrence: e.recurrence ?? null,
     etag: e.etag ?? null,
+    updated: e.updated ?? null,
     status: e.status ?? null,
     title: e.summary ?? '(no title)',
     description: e.description ?? null,
@@ -116,23 +140,31 @@ function mapGoogleEvent(e: calendar_v3.Schema$Event): GoogleEvent {
     end,
     allDay: isAllDay,
     location: e.location ?? null,
-    timezone: e.start?.timeZone ?? e.end?.timeZone ?? null,
+    timezone: timeZone,
   }
 }
 
-function toGoogleResource(input: GoogleEventInput): calendar_v3.Schema$Event {
+export function googleEventToResource(
+  input: GoogleEventInput
+): calendar_v3.Schema$Event {
   const base = {
     summary: input.title || '(no title)',
-    description: input.description ?? undefined,
-    location: input.location ?? undefined,
+    description: input.description === undefined ? undefined : input.description,
+    location: input.location === undefined ? undefined : input.location,
+    recurrence: input.recurrence,
   }
 
   if (input.allDay) {
+    const timeZone = input.timezone ?? 'UTC'
+    const inclusiveEndDate = dateInTimeZone(new Date(input.end), timeZone)
+    const exclusiveEndDate = addCalendarDays(inclusiveEndDate, 1)
     // Convert the inclusive local end back to Google's exclusive end.date.
     return {
       ...base,
-      start: { date: format(parseISO(input.start), 'yyyy-MM-dd') },
-      end: { date: format(addDays(parseISO(input.end), 1), 'yyyy-MM-dd') },
+      start: {
+        date: dateInTimeZone(new Date(input.start), timeZone),
+      },
+      end: { date: exclusiveEndDate },
     }
   }
 
@@ -163,11 +195,14 @@ export async function listCalendarEvents(
       timeMin: opts.timeMin,
       timeMax: opts.timeMax,
       singleEvents: true,
+      showDeleted: true,
       orderBy: 'startTime',
       maxResults: 2500,
       pageToken,
     })
-    for (const item of res.data.items ?? []) events.push(mapGoogleEvent(item))
+    for (const item of res.data.items ?? []) {
+      events.push(mapGoogleEvent(item, res.data.timeZone ?? 'UTC'))
+    }
     pageToken = res.data.nextPageToken ?? undefined
   } while (pageToken)
 
@@ -184,28 +219,129 @@ export async function insertCalendarEvent(
 
   const res = await calendar.events.insert({
     calendarId,
-    requestBody: toGoogleResource(input),
+    requestBody: googleEventToResource(input),
   })
 
-  return { event: mapGoogleEvent(res.data), refreshed: captured.refreshed }
+  return {
+    event: mapGoogleEvent(res.data, input.timezone ?? 'UTC'),
+    refreshed: captured.refreshed,
+  }
+}
+
+export async function getCalendarEvent(
+  tokens: CalendarTokens,
+  googleEventId: string,
+  calendarId = 'primary',
+  calendarTimeZone = 'UTC'
+): Promise<Result<{ event: GoogleEvent; resource: calendar_v3.Schema$Event }>> {
+  const { client, captured } = makeClient(tokens)
+  const calendar = google.calendar({ version: 'v3', auth: client })
+  const res = await calendar.events.get({ calendarId, eventId: googleEventId })
+
+  return {
+    event: mapGoogleEvent(res.data, calendarTimeZone),
+    resource: res.data,
+    refreshed: captured.refreshed,
+  }
+}
+
+export async function patchCalendarEventRecurrence(
+  tokens: CalendarTokens,
+  googleEventId: string,
+  recurrence: string[],
+  calendarId = 'primary',
+  expectedEtag?: string | null
+): Promise<Result<{ etag: string | null }>> {
+  const { client, captured } = makeClient(tokens)
+  const calendar = google.calendar({ version: 'v3', auth: client })
+
+  const res = await calendar.events.patch(
+    {
+      calendarId,
+      eventId: googleEventId,
+      requestBody: { recurrence },
+    },
+    expectedEtag ? { headers: { 'If-Match': expectedEtag } } : undefined
+  )
+
+  return { etag: res.data.etag ?? null, refreshed: captured.refreshed }
+}
+
+/** Copy the writable event fields Google expects when splitting a series. */
+export function copyCalendarEventResource(
+  parent: calendar_v3.Schema$Event,
+  input: GoogleEventInput
+): calendar_v3.Schema$Event {
+  const changed = googleEventToResource(input)
+
+  return {
+    summary: changed.summary,
+    description: changed.description,
+    location: changed.location,
+    start: changed.start,
+    end: changed.end,
+    recurrence: changed.recurrence,
+    attendees: parent.attendees,
+    reminders: parent.reminders,
+    colorId: parent.colorId,
+    conferenceData: parent.conferenceData,
+    attachments: parent.attachments,
+    extendedProperties: parent.extendedProperties,
+    transparency: parent.transparency,
+    visibility: parent.visibility,
+    guestsCanInviteOthers: parent.guestsCanInviteOthers,
+    guestsCanModify: parent.guestsCanModify,
+    guestsCanSeeOtherGuests: parent.guestsCanSeeOtherGuests,
+    anyoneCanAddSelf: parent.anyoneCanAddSelf,
+    source: parent.source,
+  }
+}
+
+export async function insertCalendarEventResource(
+  tokens: CalendarTokens,
+  resource: calendar_v3.Schema$Event,
+  calendarId = 'primary',
+  calendarTimeZone = 'UTC'
+): Promise<Result<{ event: GoogleEvent }>> {
+  const { client, captured } = makeClient(tokens)
+  const calendar = google.calendar({ version: 'v3', auth: client })
+
+  const res = await calendar.events.insert({
+    calendarId,
+    conferenceDataVersion: 1,
+    supportsAttachments: true,
+    requestBody: resource,
+  })
+
+  return {
+    event: mapGoogleEvent(res.data, calendarTimeZone),
+    refreshed: captured.refreshed,
+  }
 }
 
 export async function patchCalendarEvent(
   tokens: CalendarTokens,
   googleEventId: string,
   input: GoogleEventInput,
-  calendarId = 'primary'
+  calendarId = 'primary',
+  expectedEtag?: string | null
 ): Promise<Result<{ event: GoogleEvent }>> {
   const { client, captured } = makeClient(tokens)
   const calendar = google.calendar({ version: 'v3', auth: client })
 
-  const res = await calendar.events.patch({
-    calendarId,
-    eventId: googleEventId,
-    requestBody: toGoogleResource(input),
-  })
+  const res = await calendar.events.patch(
+    {
+      calendarId,
+      eventId: googleEventId,
+      requestBody: googleEventToResource(input),
+    },
+    expectedEtag ? { headers: { 'If-Match': expectedEtag } } : undefined
+  )
 
-  return { event: mapGoogleEvent(res.data), refreshed: captured.refreshed }
+  return {
+    event: mapGoogleEvent(res.data, input.timezone ?? 'UTC'),
+    refreshed: captured.refreshed,
+  }
 }
 
 export async function deleteCalendarEvent(

@@ -288,7 +288,10 @@ export function WeekView({
 
   return (
     <div className="flex flex-col h-full overflow-hidden" data-slot="week-view">
-      <div className="flex-1 overflow-auto" ref={scrollContainerRef}>
+      <div
+        className="flex-1 overflow-auto overscroll-none"
+        ref={scrollContainerRef}
+      >
         {/* Sticky header with dates */}
         <div className="sticky top-0 z-30 grid grid-cols-8 border-border/70 border-b bg-background">
           <div className="py-2 text-center text-xs sm:text-sm text-on-surface-variant">

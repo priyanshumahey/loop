@@ -15,7 +15,10 @@ import { toast } from "sonner";
 
 import { EventDescription } from "@/components/event-calendar/event-description";
 import { EventDialog } from "@/components/event-calendar/event-dialog";
-import type { CalendarEvent } from "@/components/event-calendar/types";
+import type {
+  CalendarEvent,
+  RecurrenceScope,
+} from "@/components/event-calendar/types";
 import { getEventColorClasses } from "@/components/event-calendar/utils";
 import { Button } from "@/components/ui/button";
 import * as eventsApi from "@/lib/api/events";
@@ -61,12 +64,19 @@ export function EventDetail({ event: initialEvent }: EventDetailProps) {
 
   const when = formatEventWhen(event);
 
-  const handleSave = async (updated: CalendarEvent) => {
+  const handleSave = async (
+    updated: CalendarEvent,
+    recurrenceScope: RecurrenceScope,
+  ) => {
     setIsEditOpen(false);
     const previous = event;
     setEvent(updated);
     try {
-      const saved = await eventsApi.updateEvent(updated.id, updated);
+      const saved = await eventsApi.updateEvent(
+        updated.id,
+        updated,
+        recurrenceScope,
+      );
       setEvent(saved);
       toast(`Event "${saved.title}" updated`, {
         description: format(new Date(saved.start), "MMM d, yyyy"),
@@ -78,10 +88,13 @@ export function EventDetail({ event: initialEvent }: EventDetailProps) {
     }
   };
 
-  const handleDelete = async (eventId: string) => {
+  const handleDelete = async (
+    eventId: string,
+    recurrenceScope: RecurrenceScope = "single",
+  ) => {
     setIsEditOpen(false);
     try {
-      await eventsApi.deleteEvent(eventId);
+      await eventsApi.deleteEvent(eventId, recurrenceScope);
       toast(`Event "${event.title}" deleted`, {
         description: format(new Date(event.start), "MMM d, yyyy"),
         position: "bottom-left",
@@ -182,8 +195,12 @@ export function EventDetail({ event: initialEvent }: EventDetailProps) {
         event={event}
         isOpen={isEditOpen}
         onClose={() => setIsEditOpen(false)}
-        onSave={(updated) => void handleSave(updated)}
-        onDelete={(id) => void handleDelete(id)}
+        onSave={(updated, recurrenceScope) =>
+          void handleSave(updated, recurrenceScope)
+        }
+        onDelete={(id, recurrenceScope) =>
+          void handleDelete(id, recurrenceScope)
+        }
       />
     </div>
   );

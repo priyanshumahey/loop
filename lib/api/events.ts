@@ -1,4 +1,7 @@
-import type { CalendarEvent } from '@/components/event-calendar/types'
+import type {
+  CalendarEvent,
+  RecurrenceScope,
+} from '@/components/event-calendar/types'
 
 const API_BASE = '/api/events'
 
@@ -24,6 +27,9 @@ function deserializeEvent(data: SerializedEvent): CalendarEvent {
     color: data.color as CalendarEvent['color'],
     location: data.location as string | undefined,
     timezone: data.timezone as string | undefined,
+    recurrence: data.recurrence as CalendarEvent['recurrence'],
+    recurringEventId: data.recurringEventId as string | undefined,
+    originalStart: data.originalStart as string | undefined,
   }
 }
 
@@ -77,9 +83,10 @@ export async function createEvent(
 
 export async function updateEvent(
   eventId: string,
-  event: Partial<CalendarEvent>
+  event: Partial<CalendarEvent>,
+  recurrenceScope: RecurrenceScope = 'single'
 ): Promise<CalendarEvent> {
-  const body: SerializedEvent = { ...event }
+  const body: SerializedEvent = { ...event, recurrenceScope }
   if (event.start) body.start = event.start.toISOString()
   if (event.end) body.end = event.end.toISOString()
 
@@ -98,8 +105,14 @@ export async function updateEvent(
   return deserializeEvent(result.data!)
 }
 
-export async function deleteEvent(eventId: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/${eventId}`, { method: 'DELETE' })
+export async function deleteEvent(
+  eventId: string,
+  recurrenceScope: RecurrenceScope = 'single'
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/${eventId}?recurrenceScope=${recurrenceScope}`,
+    { method: 'DELETE' }
+  )
   if (!response.ok) {
     const error: ApiResponse<never> = await response.json()
     throw new Error(error.error || 'Failed to delete event')

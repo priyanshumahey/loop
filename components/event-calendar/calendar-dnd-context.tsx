@@ -64,11 +64,19 @@ export const useCalendarDnd = () => useContext(CalendarDndContext);
 interface CalendarDndProviderProps {
   children: ReactNode;
   onEventUpdate: (event: CalendarEvent) => void;
+  /**
+   * Fired when an event is dropped onto an external drop target (one whose
+   * droppable data carries `dropZone: "agent"`), e.g. the calendar assistant
+   * sidebar. When set, such a drop attaches the event as context instead of
+   * moving it on the calendar.
+   */
+  onEventDropExternal?: (event: CalendarEvent) => void;
 }
 
 export function CalendarDndProvider({
   children,
   onEventUpdate,
+  onEventDropExternal,
 }: CalendarDndProviderProps) {
   const [activeEvent, setActiveEvent] = useState<CalendarEvent | null>(null);
   const [activeId, setActiveId] = useState<UniqueIdentifier | null>(null);
@@ -164,6 +172,10 @@ export function CalendarDndProvider({
   const handleDragOver = useCallback((event: DragOverEvent) => {
     const { over } = event;
 
+    // Dropping onto an external zone (e.g. the agent sidebar) doesn't move the
+    // event on the calendar, so don't recompute a target time from it.
+    if (over?.data.current?.dropZone === "agent") return;
+
     if (over && activeEvent && over.data.current) {
       const { date, time } = over.data.current as { date: Date; time?: number };
 
@@ -238,6 +250,13 @@ export function CalendarDndProvider({
     }
 
     try {
+      // Dropped onto an external target (the calendar assistant sidebar): attach
+      // the event as context rather than rescheduling it. `finally` resets state.
+      if (over.data.current?.dropZone === "agent") {
+        onEventDropExternal?.(activeEvent);
+        return;
+      }
+
       // Safely access data with checks
       if (!active.data.current || !over.data.current) {
         throw new Error("Missing data in drag event");
@@ -319,7 +338,7 @@ export function CalendarDndProvider({
       setMultiDayWidth(null);
       setDragHandlePosition(null);
     }
-  }, [activeEvent, currentTime, onEventUpdate]);
+  }, [activeEvent, currentTime, onEventUpdate, onEventDropExternal]);
 
   // Memoize context value to prevent unnecessary re-renders
   const contextValue = useMemo(

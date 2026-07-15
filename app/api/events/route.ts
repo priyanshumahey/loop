@@ -1,6 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
-import type { CalendarEvent } from '@/components/event-calendar/types'
+import type {
+  CalendarEvent,
+  EventRecurrence,
+} from '@/components/event-calendar/types'
 import { createEvent, getEvents } from '@/lib/db/events'
 
 function serialize(event: CalendarEvent) {
@@ -56,6 +59,7 @@ export async function POST(request: NextRequest) {
     color: body.color as CalendarEvent['color'],
     location: body.location as string | undefined,
     timezone: body.timezone as string | undefined,
+    recurrence: body.recurrence as EventRecurrence | undefined,
   }
 
   const result = await createEvent(event)

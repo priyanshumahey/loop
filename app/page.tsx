@@ -13,7 +13,7 @@ export default async function Page() {
   } = await supabase.auth.getUser()
 
   return (
-    <main className="sky-canvas relative flex min-h-svh flex-col items-center justify-center gap-10 px-6 text-center">
+    <main className="sky-canvas relative flex h-svh flex-col items-center justify-center gap-10 overflow-hidden overscroll-none px-6 text-center">
       <div className="flex flex-col items-center gap-6">
         <span className="grid size-16 place-items-center rounded-2xl bg-foreground text-background shadow-lg">
           <LoopMark className="h-9 w-[30px]" />

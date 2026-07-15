@@ -10,14 +10,19 @@ import {
 import { tool } from "ai"
 import { z } from "zod"
 
-import type { CalendarEvent } from "@/components/event-calendar/types"
+import type {
+  CalendarEvent,
+  EventRecurrence,
+  RecurrenceScope,
+} from "@/components/event-calendar/types"
 import {
   createEvent as dbCreateEvent,
   deleteEvent as dbDeleteEvent,
+  getEventById as dbGetEventById,
   getEvents,
   updateEvent as dbUpdateEvent,
 } from "@/lib/db/events"
-import { isGoogleConnected } from "@/lib/google-sync"
+import { isGoogleConnected, pullGoogleEvents } from "@/lib/google-sync"
 import { createClient } from "@/lib/supabase/server"
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -32,6 +37,8 @@ export interface AgentEvent {
   location: string | null
   description: string | null
   color: string | null
+  recurringEventId: string | null
+  originalStart: string | null
 }
 
 /** Per-day meeting-hours breakdown for the stats card. */
@@ -55,6 +62,17 @@ export interface FreeSlot {
   start: string
   end: string
   durationMinutes: number
+}
+
+/** Result of checking whether one exact requested window is free. */
+export interface AvailabilityCheck {
+  start: string
+  end: string
+  available: boolean
+  conflicts: AgentEvent[]
+  connected: boolean
+  verified: boolean
+  error?: string
 }
 
 /** Which mini-calendar layout the UI should render. */
@@ -95,6 +113,32 @@ async function checkGoogleConnected(): Promise<boolean> {
     return await isGoogleConnected(supabase, user.id)
   } catch {
     return false
+  }
+}
+
+/** Refresh one calendar range from Google and distinguish absent auth from failure. */
+async function syncGoogleRange(
+  startDate: Date,
+  endDate: Date
+): Promise<{ connected: boolean; synced: boolean }> {
+  try {
+    const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return { connected: false, synced: false }
+    const connected = await isGoogleConnected(supabase, user.id)
+    if (!connected) return { connected: false, synced: false }
+    const result = await pullGoogleEvents(
+      supabase,
+      user.id,
+      startDate.toISOString(),
+      endDate.toISOString()
+    )
+    return { connected: true, synced: result.synced }
+  } catch (error) {
+    console.error("Failed to refresh calendar range for agent:", error)
+    return { connected: true, synced: false }
   }
 }
 
@@ -194,6 +238,8 @@ function toAgentEvent(e: CalendarEvent): AgentEvent {
     location: e.location ?? null,
     description: e.description ?? null,
     color: e.color ?? null,
+    recurringEventId: e.recurringEventId ?? null,
+    originalStart: e.originalStart ?? null,
   }
 }
 
@@ -210,22 +256,35 @@ const searchEvents = tool({
   inputSchema: z.object({
     query: z
       .string()
-      .describe("Keywords to match, e.g. 'standup', 'dentist', 'Joe 1:1'. Empty matches all."),
+      .describe(
+        "Keywords to match, e.g. 'standup', 'dentist', 'Joe 1:1'. Empty matches all."
+      ),
     start: z
       .string()
       .optional()
-      .describe("ISO datetime for the start of the search window. Defaults to 30 days ago."),
+      .describe(
+        "ISO datetime for the start of the search window. Defaults to 30 days ago."
+      ),
     end: z
       .string()
       .optional()
-      .describe("ISO datetime for the end of the search window. Defaults to 90 days ahead."),
+      .describe(
+        "ISO datetime for the end of the search window. Defaults to 90 days ahead."
+      ),
   }),
   execute: async ({
     query,
     start,
     end,
-  }): Promise<{ count: number; events: AgentEvent[]; connected: boolean; error?: string }> => {
-    const startDate = start ? new Date(start) : new Date(Date.now() - 30 * DAY_MS)
+  }): Promise<{
+    count: number
+    events: AgentEvent[]
+    connected: boolean
+    error?: string
+  }> => {
+    const startDate = start
+      ? new Date(start)
+      : new Date(Date.now() - 30 * DAY_MS)
     const endDate = end ? new Date(end) : new Date(Date.now() + 90 * DAY_MS)
 
     const result = await getEvents({ startDate, endDate })
@@ -255,6 +314,30 @@ const searchEvents = tool({
   },
 })
 
+/** Retrieve the latest state of an event whose stable id is already known. */
+const getEventById = tool({
+  description:
+    "Get the current version of a calendar event by its stable id. Use this " +
+    "when an event id is available from an earlier create, search, list, or " +
+    "calendar tool result, especially before updating or deleting it. This " +
+    "preserves references even if the user renamed the event. Do not search by " +
+    "title when you already have the id.",
+  inputSchema: z.object({
+    eventId: z.string().describe("The stable id of the event to retrieve."),
+  }),
+  execute: async ({
+    eventId,
+  }): Promise<{ event?: AgentEvent; error?: string }> => {
+    const initial = await dbGetEventById(eventId)
+    if (!initial.success) return { error: initial.error }
+
+    await syncGoogleRange(initial.data.start, initial.data.end)
+    const refreshed = await dbGetEventById(eventId)
+    if (!refreshed.success) return { error: refreshed.error }
+    return { event: toAgentEvent(refreshed.data) }
+  },
+})
+
 /**
  * Summarize how the user is spending time in meetings over a window. Computes
  * total meeting hours, count, and a per-day breakdown so the model can give
@@ -270,16 +353,24 @@ const calendarStats = tool({
     start: z
       .string()
       .optional()
-      .describe("ISO datetime for the start of the range. Defaults to the start of this week."),
+      .describe(
+        "ISO datetime for the start of the range. Defaults to the start of this week."
+      ),
     end: z
       .string()
       .optional()
-      .describe("ISO datetime for the end of the range. Defaults to the end of this week."),
+      .describe(
+        "ISO datetime for the end of the range. Defaults to the end of this week."
+      ),
   }),
   execute: async ({
     start,
     end,
-  }): Promise<{ stats?: CalendarStats; connected: boolean; error?: string }> => {
+  }): Promise<{
+    stats?: CalendarStats
+    connected: boolean
+    error?: string
+  }> => {
     const now = new Date()
     const startDate = start ? new Date(start) : startOfWeek(now)
     const endDate = end ? new Date(end) : endOfWeek(now)
@@ -308,7 +399,9 @@ const calendarStats = tool({
       hours: round1(hours),
     }))
     const busiestDay =
-      byDay.length > 0 ? byDay.reduce((a, b) => (b.hours > a.hours ? b : a)) : null
+      byDay.length > 0
+        ? byDay.reduce((a, b) => (b.hours > a.hours ? b : a))
+        : null
 
     const stats: CalendarStats = {
       rangeStart: startDate.toISOString(),
@@ -320,7 +413,8 @@ const calendarStats = tool({
       byDay,
     }
 
-    const connected = result.data.length > 0 ? true : await checkGoogleConnected()
+    const connected =
+      result.data.length > 0 ? true : await checkGoogleConnected()
     return { stats, connected }
   },
 })
@@ -338,16 +432,25 @@ const listEvents = tool({
     start: z
       .string()
       .optional()
-      .describe("ISO datetime for the start of the range. Defaults to the start of today."),
+      .describe(
+        "ISO datetime for the start of the range. Defaults to the start of today."
+      ),
     end: z
       .string()
       .optional()
-      .describe("ISO datetime for the end of the range. Defaults to 7 days from now."),
+      .describe(
+        "ISO datetime for the end of the range. Defaults to 7 days from now."
+      ),
   }),
   execute: async ({
     start,
     end,
-  }): Promise<{ count: number; events: AgentEvent[]; connected: boolean; error?: string }> => {
+  }): Promise<{
+    count: number
+    events: AgentEvent[]
+    connected: boolean
+    error?: string
+  }> => {
     const now = new Date()
     const startDate = start ? new Date(start) : startOfDay(now)
     const endDate = end ? new Date(end) : endOfDay(addDays(now, 7))
@@ -362,6 +465,64 @@ const listEvents = tool({
 
     const connected = events.length > 0 ? true : await checkGoogleConnected()
     return { count: events.length, events, connected }
+  },
+})
+
+/** Check one exact proposed interval instead of generating alternative slots. */
+const checkAvailability = tool({
+  description:
+    "Check whether one exact date/time window is free and return any conflicting " +
+    "events. Use this when the requested start and end are already known, " +
+    "including when they appear in pasted email or message text. Prefer this over " +
+    "findFreeSlots for questions like 'can this interview fit from 10:30 to 3:30?'.",
+  inputSchema: z.object({
+    start: z.string().describe("ISO datetime for the exact requested start."),
+    end: z.string().describe("ISO datetime for the exact requested end."),
+  }),
+  execute: async ({ start, end }): Promise<AvailabilityCheck> => {
+    const startDate = new Date(start)
+    const endDate = new Date(end)
+    if (
+      Number.isNaN(startDate.getTime()) ||
+      Number.isNaN(endDate.getTime()) ||
+      endDate <= startDate
+    ) {
+      return {
+        start,
+        end,
+        available: false,
+        conflicts: [],
+        connected: await checkGoogleConnected(),
+        verified: false,
+        error: "The availability window is invalid.",
+      }
+    }
+
+    const sync = await syncGoogleRange(startDate, endDate)
+    const result = await getEvents({ startDate, endDate })
+    if (!result.success) {
+      return {
+        start,
+        end,
+        available: false,
+        conflicts: [],
+        connected: sync.connected,
+        verified: sync.synced,
+        error: result.error,
+      }
+    }
+
+    const conflicts = result.data
+      .filter((event) => event.end > startDate && event.start < endDate)
+      .map(toAgentEvent)
+    return {
+      start: startDate.toISOString(),
+      end: endDate.toISOString(),
+      available: conflicts.length === 0,
+      conflicts,
+      connected: sync.connected,
+      verified: sync.synced,
+    }
   },
 })
 
@@ -454,12 +615,12 @@ function makeShowCalendar(timeZone?: string) {
  */
 const findFreeSlots = tool({
   description:
-    "Find open time slots on the user's calendar. Searches the whole day by " +
-    "default (the UI flags early-morning and late-night options). Honors a " +
-    "minimum duration and optional earliest/latest hour bounds — only pass those " +
-    "when the user asks to limit hours (e.g. earliestHour 9 + latestHour 17 for " +
-    "working hours). Use for scheduling questions like 'when am I free for a 30 " +
-    "minute meeting this week'. Defaults to the next 7 days.",
+    "Find exact-duration open time options on the user's calendar when the start " +
+    "time is not already known. Searches the whole day by default (the UI flags " +
+    "early-morning and late-night options). Honors optional earliest/latest hour " +
+    "bounds; pass them whenever the user's request or pasted source text specifies " +
+    "a time-of-day window. Use for questions like 'when am I free for a 30 minute " +
+    "meeting this week'. Defaults to the next 7 days.",
   inputSchema: z.object({
     durationMinutes: z
       .number()
@@ -467,11 +628,15 @@ const findFreeSlots = tool({
     start: z
       .string()
       .optional()
-      .describe("ISO datetime for the start of the search range. Defaults to now."),
+      .describe(
+        "ISO datetime for the start of the search range. Defaults to now."
+      ),
     end: z
       .string()
       .optional()
-      .describe("ISO datetime for the end of the search range. Defaults to 7 days from now."),
+      .describe(
+        "ISO datetime for the end of the search range. Defaults to 7 days from now."
+      ),
     earliestHour: z
       .number()
       .optional()
@@ -510,7 +675,13 @@ const findFreeSlots = tool({
     const result = await getEvents({ startDate, endDate })
     if (!result.success) {
       const connected = await checkGoogleConnected()
-      return { slots: [], durationMinutes, connected, hasOffHours: false, error: result.error }
+      return {
+        slots: [],
+        durationMinutes,
+        connected,
+        hasOffHours: false,
+        error: result.error,
+      }
     }
 
     const busy = result.data
@@ -543,7 +714,7 @@ const findFreeSlots = tool({
         if (b.s.getTime() - cursor.getTime() >= needMs) {
           slots.push({
             start: cursor.toISOString(),
-            end: b.s.toISOString(),
+            end: new Date(cursor.getTime() + needMs).toISOString(),
             durationMinutes,
           })
         }
@@ -552,7 +723,7 @@ const findFreeSlots = tool({
       if (windowEnd.getTime() - cursor.getTime() >= needMs) {
         slots.push({
           start: cursor.toISOString(),
-          end: windowEnd.toISOString(),
+          end: new Date(cursor.getTime() + needMs).toISOString(),
           durationMinutes,
         })
       }
@@ -562,7 +733,8 @@ const findFreeSlots = tool({
 
     const finalSlots = slots.slice(0, 12)
     const hasOffHours = finalSlots.some((s) => isOffHours(s.start, s.end))
-    const connected = finalSlots.length > 0 ? true : await checkGoogleConnected()
+    const connected =
+      finalSlots.length > 0 ? true : await checkGoogleConnected()
     return { slots: finalSlots, durationMinutes, connected, hasOffHours }
   },
 })
@@ -579,64 +751,109 @@ const eventColorSchema = z
       "amber, orange → orange."
   )
 
+const recurrenceSchema = z
+  .object({
+    frequency: z.enum(["daily", "weekly", "monthly", "yearly"]),
+    interval: z.number().int().min(1).max(99).optional(),
+    byWeekday: z
+      .array(z.number().int().min(0).max(6))
+      .optional()
+      .describe("Days for weekly recurrence, Sunday=0 through Saturday=6."),
+    ends: z.enum(["never", "on", "after"]).optional(),
+    until: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional()
+      .describe("Inclusive end date for ends=on, as YYYY-MM-DD."),
+    count: z
+      .number()
+      .int()
+      .min(1)
+      .max(999)
+      .optional()
+      .describe("Number of occurrences for ends=after."),
+  })
+  .optional()
+
 /**
  * Create a new event on the user's calendar. Gated behind user approval (see
  * the route's toolApproval config) so nothing is written without confirmation.
  */
-const createEvent = tool({
-  description:
-    "Create a new calendar event. The user must approve before it is created. " +
-    "Provide ISO datetimes for start and end.",
-  inputSchema: z.object({
-    title: z.string().describe("Event title."),
-    start: z.string().describe("ISO datetime for the event start."),
-    end: z.string().describe("ISO datetime for the event end."),
-    allDay: z.boolean().optional().describe("Whether it's an all-day event."),
-    location: z.string().optional().describe("Optional location."),
-    description: z.string().optional().describe("Optional description."),
-    color: eventColorSchema.optional(),
-  }),
-  execute: async ({
-    title,
-    start,
-    end,
-    allDay,
-    location,
-    description,
-    color,
-  }): Promise<{ ok: boolean; event?: AgentEvent; error?: string }> => {
-    const res = await dbCreateEvent({
-      id: "",
+function makeCreateEvent(timeZone?: string) {
+  return tool({
+    description:
+      "Create a new calendar event. The user must approve before it is created. " +
+      "Provide ISO datetimes for start and end. For a repeating event, pass recurrence.",
+    inputSchema: z.object({
+      title: z.string().describe("Event title."),
+      start: z.string().describe("ISO datetime for the event start."),
+      end: z.string().describe("ISO datetime for the event end."),
+      allDay: z.boolean().optional().describe("Whether it's an all-day event."),
+      location: z.string().optional().describe("Optional location."),
+      description: z.string().optional().describe("Optional description."),
+      color: eventColorSchema.optional(),
+      recurrence: recurrenceSchema,
+    }),
+    execute: async ({
       title,
-      start: new Date(start),
-      end: new Date(end),
-      allDay: allDay ?? false,
+      start,
+      end,
+      allDay,
       location,
       description,
       color,
-    } as CalendarEvent)
-    if (!res.success) return { ok: false, error: res.error }
-    return { ok: true, event: toAgentEvent(res.data) }
-  },
-})
+      recurrence,
+    }): Promise<{ ok: boolean; event?: AgentEvent; error?: string }> => {
+      const res = await dbCreateEvent({
+        id: "",
+        title,
+        start: new Date(start),
+        end: new Date(end),
+        allDay: allDay ?? false,
+        location,
+        description,
+        color,
+        recurrence: recurrence as EventRecurrence | undefined,
+        timezone: timeZone,
+      } as CalendarEvent)
+      if (!res.success) return { ok: false, error: res.error }
+      return { ok: true, event: toAgentEvent(res.data) }
+    },
+  })
+}
 
 /** Update an existing event (by id). Gated behind user approval. */
 const updateEvent = tool({
   description:
     "Update an existing calendar event by its id (reschedule, rename, move, recolor, etc). " +
-    "The user must approve before changes are applied. Only pass the fields that " +
-    "change, but ALWAYS also pass the event's current `title` so the confirmation " +
-    "card reads clearly (passing the unchanged title is fine). Find the event id " +
-    "first via searchEvents or listEvents.",
+    "The user must approve before changes are applied. Pass `eventTitle` only as " +
+    "display context for the confirmation card; it is never written. Only pass " +
+    "`title` when the user explicitly wants to rename the event, and otherwise " +
+    "pass only fields that change. If an earlier tool result contains the event " +
+    "id, call getEventById to refresh it instead of searching by title.",
   inputSchema: z.object({
     eventId: z.string().describe("The id of the event to update."),
-    title: z.string().optional().describe("The event title (pass the current one for the confirmation card)."),
+    eventTitle: z
+      .string()
+      .describe(
+        "Current event title for the confirmation card. This is not written."
+      ),
+    title: z
+      .string()
+      .optional()
+      .describe("New event title. Only pass when renaming."),
     start: z.string().optional().describe("New ISO start datetime."),
     end: z.string().optional().describe("New ISO end datetime."),
     allDay: z.boolean().optional(),
     location: z.string().optional(),
     description: z.string().optional(),
     color: eventColorSchema.optional(),
+    recurrenceScope: z
+      .enum(["single", "following", "series"])
+      .optional()
+      .describe(
+        "For a recurring event: 'single' updates only this occurrence, 'following' updates this and all later occurrences, 'series' updates every occurrence. Defaults to single."
+      ),
   }),
   execute: async ({
     eventId,
@@ -647,6 +864,7 @@ const updateEvent = tool({
     location,
     description,
     color,
+    recurrenceScope,
   }): Promise<{ ok: boolean; event?: AgentEvent; error?: string }> => {
     const updates: Partial<CalendarEvent> = {}
     if (title !== undefined) updates.title = title
@@ -657,7 +875,11 @@ const updateEvent = tool({
     if (description !== undefined) updates.description = description
     if (color !== undefined) updates.color = color
 
-    const res = await dbUpdateEvent(eventId, updates)
+    const res = await dbUpdateEvent(
+      eventId,
+      updates,
+      recurrenceScope as RecurrenceScope | undefined
+    )
     if (!res.success) return { ok: false, error: res.error }
     return { ok: true, event: toAgentEvent(res.data) }
   },
@@ -671,10 +893,25 @@ const deleteEvent = tool({
     "title too so the confirmation is clear.",
   inputSchema: z.object({
     eventId: z.string().describe("The id of the event to delete."),
-    title: z.string().optional().describe("The event title, for the confirmation card."),
+    title: z
+      .string()
+      .optional()
+      .describe("The event title, for the confirmation card."),
+    recurrenceScope: z
+      .enum(["single", "following", "series"])
+      .optional()
+      .describe(
+        "For a recurring event: 'single' deletes only this occurrence, 'following' deletes this and all later occurrences, 'series' deletes every occurrence. Defaults to single."
+      ),
   }),
-  execute: async ({ eventId }): Promise<{ ok: boolean; error?: string }> => {
-    const res = await dbDeleteEvent(eventId)
+  execute: async ({
+    eventId,
+    recurrenceScope,
+  }): Promise<{ ok: boolean; error?: string }> => {
+    const res = await dbDeleteEvent(
+      eventId,
+      recurrenceScope as RecurrenceScope | undefined
+    )
     if (!res.success) return { ok: false, error: res.error }
     return { ok: true }
   },
@@ -688,15 +925,21 @@ const deleteEvent = tool({
 export function buildCalendarTools(timeZone?: string) {
   return {
     searchEvents,
+    getEventById,
     calendarStats,
     listEvents,
+    checkAvailability,
     showCalendar: makeShowCalendar(timeZone),
     findFreeSlots,
-    createEvent,
+    createEvent: makeCreateEvent(timeZone),
     updateEvent,
     deleteEvent,
   }
 }
 
 /** Tools that mutate the calendar and therefore require user approval. */
-export const APPROVAL_TOOLS = ["createEvent", "updateEvent", "deleteEvent"] as const
+export const APPROVAL_TOOLS = [
+  "createEvent",
+  "updateEvent",
+  "deleteEvent",
+] as const

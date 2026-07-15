@@ -1,11 +1,25 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import { z } from 'zod'
 
-import type { CalendarEvent } from '@/components/event-calendar/types'
+import type {
+  CalendarEvent,
+  RecurrenceScope,
+} from '@/components/event-calendar/types'
 import { deleteEvent, getEventById, updateEvent } from '@/lib/db/events'
 
 interface RouteParams {
   params: Promise<{ id: string }>
 }
+
+const recurrenceSchema = z.object({
+  frequency: z.enum(['daily', 'weekly', 'monthly', 'yearly']),
+  interval: z.number().int().min(1).max(99).optional(),
+  byWeekday: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+  ends: z.enum(['never', 'on', 'after']).optional(),
+  until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  count: z.number().int().min(1).max(999).optional(),
+  readOnly: z.boolean().optional(),
+})
 
 function serialize(event: CalendarEvent) {
   return { ...event, start: event.start.toISOString(), end: event.end.toISOString() }
@@ -48,19 +62,42 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   if (body.color !== undefined) updates.color = body.color as CalendarEvent['color']
   if (body.location !== undefined) updates.location = body.location as string | undefined
   if (body.timezone !== undefined) updates.timezone = body.timezone as string | undefined
+  if (body.recurrence !== undefined) {
+    const recurrence = recurrenceSchema.safeParse(body.recurrence)
+    if (!recurrence.success) {
+      return NextResponse.json(
+        { error: 'Invalid recurrence rule' },
+        { status: 400 }
+      )
+    }
+    updates.recurrence = recurrence.data
+  }
 
-  const result = await updateEvent(id, updates)
+  const recurrenceScope: RecurrenceScope =
+    body.recurrenceScope === 'series'
+      ? 'series'
+      : body.recurrenceScope === 'following'
+        ? 'following'
+        : 'single'
+  const result = await updateEvent(id, updates, recurrenceScope)
   if (!result.success) {
     return NextResponse.json({ error: result.error }, { status: statusFor(result.error) })
   }
   return NextResponse.json({ data: serialize(result.data) })
 }
 
-export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
   const { id } = await params
   if (!id) return NextResponse.json({ error: 'Event ID is required' }, { status: 400 })
 
-  const result = await deleteEvent(id)
+  const scopeParam = request.nextUrl.searchParams.get('recurrenceScope')
+  const recurrenceScope: RecurrenceScope =
+    scopeParam === 'series'
+      ? 'series'
+      : scopeParam === 'following'
+        ? 'following'
+        : 'single'
+  const result = await deleteEvent(id, recurrenceScope)
   if (!result.success) {
     return NextResponse.json({ error: result.error }, { status: statusFor(result.error) })
   }

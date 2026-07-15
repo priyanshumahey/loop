@@ -6,14 +6,18 @@ import {
   lastAssistantMessageIsCompleteWithApprovalResponses,
   type UIMessage,
 } from "ai"
+import { format, isSameDay } from "date-fns"
 import {
+  CalendarIcon,
   CheckIcon,
   CopyIcon,
+  LayersIcon,
   PanelRightCloseIcon,
   PenSquareIcon,
   RefreshCwIcon,
   SparklesIcon,
   TriangleAlertIcon,
+  XIcon,
   ZapIcon,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
@@ -24,6 +28,7 @@ import { ChatInput } from "@/components/chat/chat-input"
 import { useSmoothText } from "@/components/chat/use-smooth-text"
 import { LoopMark } from "@/components/loop-logo"
 import { AgendaList } from "@/components/cal/agent/agenda-list"
+import { AvailabilityCheck } from "@/components/cal/agent/availability-check"
 import { CalendarStatsCard } from "@/components/cal/agent/calendar-stats-card"
 import { EventSearchResults } from "@/components/cal/agent/event-search-results"
 import { FreeSlots } from "@/components/cal/agent/free-slots"
@@ -32,9 +37,16 @@ import {
   ProposedChange,
   type WriteAction,
 } from "@/components/cal/agent/proposed-change"
+import type { CalendarEvent } from "@/components/event-calendar/types"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { usePersistentState } from "@/hooks/use-persistent-state"
 import type {
   AgentEvent,
+  AvailabilityCheck as AvailabilityData,
   CalendarStats,
   CalendarView,
   CalendarViewData,
@@ -64,6 +76,78 @@ type SlotsOutput = {
   error?: string
 }
 type CalendarOutput = CalendarViewData
+type AvailabilityOutput = AvailabilityData
+
+/** A calendar event attached to a message as context (dragged onto the panel). */
+export type ContextEvent = {
+  id: string
+  title: string
+  start: string
+  end: string
+  allDay?: boolean
+  location?: string
+  color?: string
+}
+
+const COLOR_TINT: Record<string, string> = {
+  sky: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
+  amber: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  violet: "bg-violet-500/15 text-violet-600 dark:text-violet-400",
+  rose: "bg-rose-500/15 text-rose-600 dark:text-rose-400",
+  emerald: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  orange: "bg-orange-500/15 text-orange-600 dark:text-orange-400",
+}
+
+/** Convert a full calendar event to the lightweight, serializable context shape. */
+export function toContextEvent(event: CalendarEvent): ContextEvent {
+  return {
+    id: event.id,
+    title: event.title || "(untitled)",
+    start: new Date(event.start).toISOString(),
+    end: new Date(event.end).toISOString(),
+    allDay: event.allDay,
+    location: event.location,
+    color: event.color,
+  }
+}
+
+/** Short label for a context event's date/time (e.g. "Mon, Jul 14 · 2:00 PM"). */
+function contextEventWhen(event: ContextEvent): string {
+  const start = new Date(event.start)
+  if (Number.isNaN(start.getTime())) return ""
+  if (event.allDay) return `All day · ${format(start, "EEE, MMM d")}`
+  return format(start, "EEE, MMM d · h:mm a")
+}
+
+/** Full start–end range for a context event's hover details. */
+function contextEventRange(event: ContextEvent): string {
+  const start = new Date(event.start)
+  const end = new Date(event.end)
+  if (Number.isNaN(start.getTime())) return ""
+  if (event.allDay) return `All day · ${format(start, "EEEE, MMMM d")}`
+  const startLabel = format(start, "EEEE, MMMM d · h:mm a")
+  if (Number.isNaN(end.getTime())) return startLabel
+  const endLabel = isSameDay(start, end)
+    ? format(end, "h:mm a")
+    : format(end, "EEEE, MMMM d · h:mm a")
+  return `${startLabel} – ${endLabel}`
+}
+
+/** Widen a context event back to the agent event shape for opening it. */
+function contextEventToAgentEvent(event: ContextEvent): AgentEvent {
+  return {
+    id: event.id,
+    title: event.title,
+    start: event.start,
+    end: event.end,
+    allDay: event.allDay ?? false,
+    location: event.location ?? null,
+    description: null,
+    color: event.color ?? null,
+    recurringEventId: null,
+    originalStart: null,
+  }
+}
 
 const SUGGESTIONS = [
   "What events do I have this week?",
@@ -88,6 +172,9 @@ export function CalAgent({
   onClose,
   onOpenEvent,
   onMutated,
+  contextEvents = [],
+  onRemoveContextEvent,
+  onClearContextEvents,
   tabBar,
   renderEmptyState,
 }: {
@@ -105,6 +192,12 @@ export function CalAgent({
   onOpenEvent?: (event: AgentEvent) => void
   /** Fired when the agent successfully creates/updates/deletes an event. */
   onMutated?: (action: WriteAction, event?: AgentEvent) => void
+  /** Events dragged onto the panel, pending attachment to the next message. */
+  contextEvents?: ContextEvent[]
+  /** Remove one pending context event. */
+  onRemoveContextEvent?: (id: string) => void
+  /** Clear all pending context events (called after a message is sent). */
+  onClearContextEvents?: () => void
   /** Optional conversation switcher rendered under the header. */
   tabBar?: React.ReactNode
   /** Custom empty state; receives a helper to send a prompt. */
@@ -152,6 +245,19 @@ export function CalAgent({
   })
 
   const isStreaming = status === "submitted" || status === "streaming"
+
+  // Send a message, attaching any pending event context as metadata (rendered
+  // above the user bubble and injected into the model prompt server-side).
+  const handleSend = useCallback(
+    (text: string) => {
+      sendMessage({
+        text,
+        metadata: contextEvents.length ? { contextEvents } : undefined,
+      })
+      onClearContextEvents?.()
+    },
+    [sendMessage, contextEvents, onClearContextEvents]
+  )
 
   // True once a turn has streamed in THIS session. Resume is ONLY for recovering
   // a turn that was already in flight when the page loaded; once the live chat
@@ -204,11 +310,12 @@ export function CalAgent({
     if (status !== "ready") return
     const last = messages.at(-1)
     if (last?.role !== "assistant") return
-    if (!lastAssistantMessageIsCompleteWithApprovalResponses({ messages })) return
+    if (!lastAssistantMessageIsCompleteWithApprovalResponses({ messages }))
+      return
     const respondedId = last.parts
       ?.map((p) => p as { state?: string; approval?: { id?: string } })
-      .find((p) => p.state === "approval-responded" && p.approval?.id)?.approval
-      ?.id
+      .find((p) => p.state === "approval-responded" && p.approval?.id)
+      ?.approval?.id
     if (!respondedId) return
     const key = `${last.id}:${respondedId}`
     if (nudgedApprovalRef.current === key) return
@@ -446,6 +553,9 @@ export function CalAgent({
                 streaming={isStreaming && mi === messages.length - 1}
                 isLast={mi === messages.length - 1}
                 onOpenEvent={handleOpenEvent}
+                onPickSlot={(slot) =>
+                  sendMessage({ text: formatSlotSelection(slot) })
+                }
                 onApprove={approve}
                 onReject={reject}
                 onRegenerate={() => regenerate()}
@@ -475,9 +585,23 @@ export function CalAgent({
         </div>
       )}
 
+      {contextEvents.length > 0 && (
+        <div className="mx-auto w-full max-w-2xl px-4 pt-3 pb-1.5">
+          <div className="w-64 max-w-full">
+            <ContextEventStack
+              events={contextEvents}
+              onOpen={(event) =>
+                handleOpenEvent(contextEventToAgentEvent(event))
+              }
+              onRemove={onRemoveContextEvent}
+            />
+          </div>
+        </div>
+      )}
+
       <ChatInput
         isStreaming={isStreaming}
-        onSend={(text) => sendMessage({ text })}
+        onSend={handleSend}
         onStop={stop}
       />
     </div>
@@ -489,6 +613,7 @@ function MessageView({
   streaming,
   isLast,
   onOpenEvent,
+  onPickSlot,
   onApprove,
   onReject,
   onRegenerate,
@@ -497,6 +622,7 @@ function MessageView({
   streaming?: boolean
   isLast?: boolean
   onOpenEvent?: (event: AgentEvent) => void
+  onPickSlot?: (slot: FreeSlot) => void
   onApprove?: (approvalId: string) => void
   onReject?: (approvalId: string) => void
   onRegenerate?: () => void
@@ -506,8 +632,23 @@ function MessageView({
       .filter((p) => p.type === "text")
       .map((p) => (p as { text: string }).text)
       .join("")
+    const contextEvents =
+      (message.metadata as { contextEvents?: ContextEvent[] } | undefined)
+        ?.contextEvents ?? []
     return (
-      <div className="flex justify-end">
+      <div className="flex flex-col items-end gap-1.5">
+        {contextEvents.length > 0 && (
+          <div className="w-64 max-w-[85%] pt-3">
+            <ContextEventStack
+              events={contextEvents}
+              onOpen={
+                onOpenEvent
+                  ? (event) => onOpenEvent(contextEventToAgentEvent(event))
+                  : undefined
+              }
+            />
+          </div>
+        )}
         <div className="max-w-[85%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-[15px] leading-relaxed break-words whitespace-pre-wrap text-foreground">
           {text}
         </div>
@@ -520,7 +661,9 @@ function MessageView({
       <div className="min-w-0 text-[15px] leading-relaxed text-foreground">
         {message.parts.map((part, i) => {
           if (part.type === "text") {
-            return <AssistantText key={i} text={part.text} streaming={streaming} />
+            return (
+              <AssistantText key={i} text={part.text} streaming={streaming} />
+            )
           }
 
           if (part.type === "tool-searchEvents") {
@@ -605,6 +748,54 @@ function MessageView({
             )
           }
 
+          if (part.type === "tool-getEventById") {
+            const toolPart = part as {
+              state: string
+              output?: { event?: AgentEvent; error?: string }
+            }
+            if (toolPart.state === "output-available") {
+              return toolPart.output?.error ? (
+                <div key={i} className="my-2 text-[12px] text-destructive">
+                  Couldn&apos;t refresh that event: {toolPart.output.error}
+                </div>
+              ) : null
+            }
+            return (
+              <div
+                key={i}
+                className="my-2 flex items-center gap-2 text-[12px] text-muted-foreground"
+              >
+                <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" />
+                Refreshing event…
+              </div>
+            )
+          }
+
+          if (part.type === "tool-checkAvailability") {
+            const toolPart = part as {
+              state: string
+              output?: AvailabilityOutput
+            }
+            if (toolPart.state === "output-available" && toolPart.output) {
+              return (
+                <AvailabilityCheck
+                  key={i}
+                  result={toolPart.output}
+                  onOpenEvent={onOpenEvent}
+                />
+              )
+            }
+            return (
+              <div
+                key={i}
+                className="my-2 flex items-center gap-2 text-[12px] text-muted-foreground"
+              >
+                <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" />
+                Checking that time…
+              </div>
+            )
+          }
+
           if (part.type === "tool-showCalendar") {
             const toolPart = part as {
               state: string
@@ -646,6 +837,7 @@ function MessageView({
                   durationMinutes={toolPart.output.durationMinutes}
                   connected={toolPart.output.connected}
                   error={toolPart.output.error}
+                  onPick={onPickSlot}
                 />
               )
             }
@@ -674,6 +866,7 @@ function MessageView({
             const toolPart = part as {
               state: string
               input?: {
+                eventTitle?: string
                 title?: string
                 start?: string
                 end?: string
@@ -681,6 +874,8 @@ function MessageView({
                 location?: string
                 eventId?: string
                 color?: string
+                recurrence?: import("@/components/event-calendar/types").EventRecurrence
+                recurrenceScope?: import("@/components/event-calendar/types").RecurrenceScope
               }
               output?: { ok: boolean; event?: AgentEvent; error?: string }
               approval?: { id: string }
@@ -714,6 +909,15 @@ function MessageView({
       </div>
     </AgentRow>
   )
+}
+
+function formatSlotSelection(slot: FreeSlot): string {
+  const start = new Date(slot.start)
+  const end = new Date(slot.end)
+  const endLabel = isSameDay(start, end)
+    ? format(end, "h:mm a")
+    : format(end, "EEEE, MMMM d 'at' h:mm a")
+  return `Use this slot: ${format(start, "EEEE, MMMM d 'from' h:mm a")} to ${endLabel}.`
 }
 
 /** Concatenate an assistant message's text parts. */
@@ -778,6 +982,194 @@ function MessageActions({
   )
 }
 
+/**
+ * One attached calendar event as a clean row: a color icon, the title, and a
+ * secondary "time · location" line. Clicking opens it; an optional remove button
+ * sits on the right. Used as the single-event chip and as each row in the
+ * expanded list.
+ */
+function ContextEventCard({
+  event,
+  onOpen,
+  onRemove,
+}: {
+  event: ContextEvent
+  onOpen?: () => void
+  onRemove?: () => void
+}) {
+  const when = contextEventWhen(event)
+  const meta = [when, event.location].filter(Boolean).join(" · ")
+  const details =
+    contextEventRange(event) + (event.location ? ` · ${event.location}` : "")
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={onOpen}
+        title={details}
+        className={cn(
+          "flex w-full items-center gap-2.5 rounded-xl border border-border/70 bg-background py-2 pl-2 text-left shadow-sm transition-colors",
+          onRemove ? "pr-9" : "pr-3",
+          onOpen
+            ? "cursor-pointer hover:border-border hover:bg-muted/50"
+            : "cursor-default"
+        )}
+      >
+        <span
+          className={cn(
+            "grid size-8 shrink-0 place-items-center rounded-lg",
+            COLOR_TINT[event.color ?? "sky"] ?? COLOR_TINT.sky
+          )}
+        >
+          <CalendarIcon className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13px] font-medium text-foreground">
+            {event.title}
+          </p>
+          {meta && (
+            <p className="truncate text-[11px] text-muted-foreground">{meta}</p>
+          )}
+        </div>
+      </button>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label="Remove context"
+          className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <XIcon className="size-3.5" />
+        </button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Attached calendar events. One event renders inline as a single chip. Multiple
+ * events collapse into a tidy stacked-card trigger that opens a portaled list on
+ * hover or click. Because the list is portaled (via Popover) it is never clipped
+ * by the chat scroll area — it always renders fully on screen and flips side to
+ * stay in view. Each row is clickable to open, and removable while composing.
+ */
+function ContextEventStack({
+  events,
+  onOpen,
+  onRemove,
+}: {
+  events: ContextEvent[]
+  onOpen?: (event: ContextEvent) => void
+  onRemove?: (id: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const cancelClose = useCallback(() => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current)
+      closeTimer.current = null
+    }
+  }, [])
+  const scheduleClose = useCallback(() => {
+    cancelClose()
+    closeTimer.current = setTimeout(() => setOpen(false), 160)
+  }, [cancelClose])
+  useEffect(() => cancelClose, [cancelClose])
+
+  if (events.length === 0) return null
+
+  if (events.length === 1) {
+    const event = events[0]
+    return (
+      <ContextEventCard
+        event={event}
+        onOpen={onOpen ? () => onOpen(event) : undefined}
+        onRemove={onRemove ? () => onRemove(event.id) : undefined}
+      />
+    )
+  }
+
+  const first = events[0]
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`${events.length} attached events`}
+          onMouseEnter={() => {
+            cancelClose()
+            setOpen(true)
+          }}
+          onMouseLeave={scheduleClose}
+          className="group/stack relative block w-full text-left"
+        >
+          {/* Stacked-paper layers peeking above the lead card signal there are
+           * more; they never peek below it, so the stack reads cleanly. */}
+          <span
+            aria-hidden
+            className="absolute inset-x-7 -top-3 h-full rounded-xl border border-border/50 bg-muted/40 shadow-sm transition-transform duration-200 group-hover/stack:-translate-y-1"
+          />
+          <span
+            aria-hidden
+            className="absolute inset-x-3.5 -top-1.5 h-full rounded-xl border border-border/60 bg-muted/20 shadow-sm transition-transform duration-200 group-hover/stack:-translate-y-0.5"
+          />
+          <div className="relative flex items-center gap-2.5 rounded-xl border border-border/70 bg-background py-2 pr-2 pl-2 shadow-sm transition-colors group-hover/stack:border-border group-hover/stack:bg-muted/50">
+            <span
+              className={cn(
+                "grid size-8 shrink-0 place-items-center rounded-lg",
+                COLOR_TINT[first.color ?? "sky"] ?? COLOR_TINT.sky
+              )}
+            >
+              <CalendarIcon className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[13px] font-medium text-foreground">
+                {first.title}
+              </p>
+              <p className="truncate text-[11px] text-muted-foreground">
+                {contextEventWhen(first)}
+              </p>
+            </div>
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+              <LayersIcon className="size-3" />
+              {events.length}
+            </span>
+          </div>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        side="top"
+        sideOffset={10}
+        collisionPadding={12}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onCloseAutoFocus={(e) => e.preventDefault()}
+        onMouseEnter={cancelClose}
+        onMouseLeave={scheduleClose}
+        className="w-72 overflow-hidden p-0"
+      >
+        <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
+          <LayersIcon className="size-3.5 text-muted-foreground" />
+          <p className="text-[12px] font-medium text-foreground">
+            {events.length} attached events
+          </p>
+        </div>
+        <div className="max-h-64 space-y-1 overflow-y-auto p-1.5">
+          {events.map((event) => (
+            <ContextEventCard
+              key={event.id}
+              event={event}
+              onOpen={onOpen ? () => onOpen(event) : undefined}
+              onRemove={onRemove ? () => onRemove(event.id) : undefined}
+            />
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 function AgentAvatar() {
   return (
     <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-foreground text-background">
@@ -815,7 +1207,13 @@ function ThinkingDots() {
 }
 
 /** Assistant markdown; text is smoothed while streaming so it reads as a steady flow. */
-function AssistantText({ text, streaming }: { text: string; streaming?: boolean }) {
+function AssistantText({
+  text,
+  streaming,
+}: {
+  text: string
+  streaming?: boolean
+}) {
   const smoothed = useSmoothText(text, Boolean(streaming))
   if (!smoothed) return null
   return (

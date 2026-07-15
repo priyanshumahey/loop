@@ -1,4 +1,8 @@
-import type { CalendarEvent, EventColor } from '@/components/event-calendar/types'
+import type {
+  CalendarEvent,
+  EventColor,
+  EventRecurrence,
+} from '@/components/event-calendar/types'
 
 /** An event row as stored in the `events` table. */
 export interface DbEvent {
@@ -16,6 +20,9 @@ export interface DbEvent {
   google_calendar_id: string
   etag: string | null
   source: 'local' | 'google'
+  recurrence: EventRecurrence | null
+  recurring_event_id: string | null
+  original_start_time: string | null
   created_at: string
   updated_at: string
 }
@@ -33,6 +40,9 @@ export interface EventInsert {
   google_calendar_id?: string
   etag?: string | null
   source?: 'local' | 'google'
+  recurrence?: EventRecurrence | null
+  recurring_event_id?: string | null
+  original_start_time?: string | null
 }
 
 export interface EventUpdate {
@@ -46,6 +56,9 @@ export interface EventUpdate {
   timezone?: string | null
   google_event_id?: string | null
   etag?: string | null
+  recurrence?: EventRecurrence | null
+  recurring_event_id?: string | null
+  original_start_time?: string | null
 }
 
 export interface EventQueryParams {
@@ -67,6 +80,9 @@ export function dbEventToCalendarEvent(dbEvent: DbEvent): CalendarEvent {
     color: dbEvent.color ?? undefined,
     location: dbEvent.location ?? undefined,
     timezone: dbEvent.timezone ?? undefined,
+    recurrence: dbEvent.recurrence ?? undefined,
+    recurringEventId: dbEvent.recurring_event_id ?? undefined,
+    originalStart: dbEvent.original_start_time ?? undefined,
   }
 }
 
@@ -80,6 +96,9 @@ export function calendarEventToDbInsert(event: CalendarEvent): EventInsert {
     color: event.color ?? null,
     location: event.location ?? null,
     timezone: event.timezone ?? null,
+    recurrence: event.recurrence ?? null,
+    recurring_event_id: event.recurringEventId ?? null,
+    original_start_time: event.originalStart ?? null,
   }
 }
 
@@ -94,6 +113,13 @@ export function calendarEventToDbUpdate(event: Partial<CalendarEvent>): EventUpd
   if (event.color !== undefined) update.color = event.color ?? null
   if (event.location !== undefined) update.location = event.location ?? null
   if (event.timezone !== undefined) update.timezone = event.timezone ?? null
+  if (event.recurrence !== undefined) update.recurrence = event.recurrence ?? null
+  if (event.recurringEventId !== undefined) {
+    update.recurring_event_id = event.recurringEventId ?? null
+  }
+  if (event.originalStart !== undefined) {
+    update.original_start_time = event.originalStart ?? null
+  }
 
   return update
 }

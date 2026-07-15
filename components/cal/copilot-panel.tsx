@@ -1,10 +1,12 @@
 "use client"
 
-import { SparklesIcon } from "lucide-react"
+import { useDroppable } from "@dnd-kit/core"
+import { CalendarPlusIcon, SparklesIcon } from "lucide-react"
 import { useCallback, useState } from "react"
 
-import { CalAgent } from "@/components/cal/cal-agent"
+import { CalAgent, type ContextEvent } from "@/components/cal/cal-agent"
 import { AgentTabs } from "@/components/cal/agent/agent-tabs"
+import { useCalendarDnd } from "@/components/event-calendar/calendar-dnd-context"
 import type { AgentEvent } from "@/lib/cal-agent/tools"
 import { useAgentConversations } from "@/hooks/use-agent-conversations"
 import { usePersistentState } from "@/hooks/use-persistent-state"
@@ -19,13 +21,25 @@ const MAX_WIDTH = "34rem"
  * A resizable AI assistant panel docked to the right edge. Drag the left rail
  * to resize; drag past the minimum (or click the rail / collapse button) to
  * hide it. Hosts the AI SDK calendar agent.
+ *
+ * The whole panel is a drop target: dragging a calendar event onto it attaches
+ * the event as context for the next message.
  */
 export function CopilotPanel({
   onOpenEvent,
   onMutated,
+  contextEvents = [],
+  onRemoveContextEvent,
+  onClearContextEvents,
 }: {
   onOpenEvent?: (event: AgentEvent) => void
   onMutated?: (action: "create" | "update" | "delete", event?: AgentEvent) => void
+  /** Events dragged onto the panel, pending attachment to the next message. */
+  contextEvents?: ContextEvent[]
+  /** Remove one pending context event. */
+  onRemoveContextEvent?: (id: string) => void
+  /** Clear all pending context events (after a message is sent). */
+  onClearContextEvents?: () => void
 } = {}) {
   const [width, setWidth] = useState(DEFAULT_WIDTH)
   const [collapsed, setCollapsed] = usePersistentState(
@@ -34,6 +48,17 @@ export function CopilotPanel({
   )
   const [isDragging, setIsDragging] = useState(false)
   const store = useAgentConversations()
+
+  const { activeEvent } = useCalendarDnd()
+  const { setNodeRef, isOver } = useDroppable({
+    id: "calendar-agent-dropzone",
+    data: { dropZone: "agent" },
+  })
+  const isEventOver = Boolean(activeEvent) && isOver
+
+  // Force the panel open while there's pending context to attach, so a drop onto
+  // the collapsed rail reveals the agent (and its compose strip) automatically.
+  const showCollapsed = collapsed && contextEvents.length === 0
 
   const toggle = useCallback(() => setCollapsed((c) => !c), [])
 
@@ -49,21 +74,27 @@ export function CopilotPanel({
     widthCookieName: "loop_copilot_width",
   })
 
-  if (collapsed) {
+  if (showCollapsed) {
     return (
       <div className="hidden h-svh shrink-0 py-2 pr-2 md:block">
         <button
+          ref={setNodeRef}
           type="button"
           onClick={() => setCollapsed(false)}
           title="Open assistant"
-          className="flex h-full w-11 flex-col items-center justify-between rounded-2xl border border-border/70 bg-background py-3 shadow-sm transition-colors hover:bg-muted"
+          className={cn(
+            "flex h-full w-11 flex-col items-center justify-between rounded-2xl border bg-background py-3 shadow-sm transition-colors hover:bg-muted",
+            isEventOver
+              ? "border-primary ring-2 ring-primary/40"
+              : "border-border/70"
+          )}
         >
           <SparklesIcon className="size-4 text-foreground" />
           <span
             className="text-[12px] font-medium tracking-wide text-muted-foreground"
             style={{ writingMode: "vertical-rl" }}
           >
-            Ask agent
+            {isEventOver ? "Drop to attach" : "Ask agent"}
           </span>
           <SparklesIcon className="size-4 text-transparent" aria-hidden />
         </button>
@@ -90,7 +121,22 @@ export function CopilotPanel({
         className="group/rail absolute inset-y-0 left-0 z-20 flex w-4 -translate-x-1/2 cursor-w-resize after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] after:transition-colors hover:after:bg-border"
       />
 
-      <div className="flex h-full w-full flex-col overflow-hidden rounded-2xl border border-border/70 bg-background shadow-sm">
+      <div
+        ref={setNodeRef}
+        className={cn(
+          "relative flex h-full w-full flex-col overflow-hidden rounded-2xl border bg-background shadow-sm transition-colors",
+          isEventOver ? "border-primary" : "border-border/70"
+        )}
+      >
+        {/* Drop hint overlay shown while dragging an event over the panel */}
+        {isEventOver && (
+          <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-2xl bg-primary/5 backdrop-blur-[1px]">
+            <div className="flex items-center gap-2 rounded-xl border border-primary/40 bg-background px-3 py-2 text-[13px] font-medium text-foreground shadow-sm">
+              <CalendarPlusIcon className="size-4 text-primary" />
+              Drop to add as context
+            </div>
+          </div>
+        )}
         <CalAgent
           key={store.activeId}
           conversationId={store.activeId}
@@ -99,6 +145,9 @@ export function CopilotPanel({
           onClose={() => setCollapsed(true)}
           onOpenEvent={onOpenEvent}
           onMutated={onMutated}
+          contextEvents={contextEvents}
+          onRemoveContextEvent={onRemoveContextEvent}
+          onClearContextEvents={onClearContextEvents}
           tabBar={
             <AgentTabs
               openConversations={store.openConversations}

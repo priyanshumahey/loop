@@ -96,12 +96,12 @@ export function FreeSlots({
                   onClick={() => onPick?.(slot)}
                   title={
                     off === "early"
-                      ? "Early morning"
+                      ? "Early morning · Use this slot"
                       : off === "late"
-                        ? "Late night"
-                        : undefined
+                        ? "Late night · Use this slot"
+                        : "Use this slot"
                   }
-                  className="flex items-center gap-1 rounded-lg border border-border/70 bg-background px-2.5 py-1 text-[12px] tabular-nums text-foreground transition-colors hover:bg-muted/60"
+                  className="flex items-center gap-1 rounded-lg border border-border/70 bg-background px-2.5 py-1 text-[12px] text-foreground tabular-nums transition-colors hover:bg-muted/60"
                 >
                   {off === "early" && (
                     <SunriseIcon className="size-3 text-amber-500" />

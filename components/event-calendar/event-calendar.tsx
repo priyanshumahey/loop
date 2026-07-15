@@ -19,7 +19,11 @@ import {
   TimeScaleProvider,
   useTimeScale,
 } from "@/components/event-calendar/time-scale-context";
-import type { CalendarEvent, CalendarView } from "@/components/event-calendar/types";
+import type {
+  CalendarEvent,
+  CalendarView,
+  RecurrenceScope,
+} from "@/components/event-calendar/types";
 import { addHoursToDate } from "@/components/event-calendar/utils";
 import { WeekView } from "@/components/event-calendar/week-view";
 import { cn } from "@/lib/utils";
@@ -27,8 +31,8 @@ import { cn } from "@/lib/utils";
 export interface EventCalendarProps {
   events?: CalendarEvent[];
   onEventAdd?: (event: CalendarEvent) => void;
-  onEventUpdate?: (event: CalendarEvent) => void;
-  onEventDelete?: (eventId: string) => void;
+  onEventUpdate?: (event: CalendarEvent, recurrenceScope?: RecurrenceScope) => void;
+  onEventDelete?: (eventId: string, recurrenceScope?: RecurrenceScope) => void;
   className?: string;
   view?: CalendarView;
   currentDate?: Date;
@@ -41,6 +45,13 @@ export interface EventCalendarProps {
   onExternalSelectedEventHandled?: () => void;
   /** Fired whenever an existing event is opened (via click or externally). */
   onEventOpen?: (event: CalendarEvent) => void;
+  canCreateRecurringEvents?: boolean;
+  /**
+   * Skip mounting the internal drag-and-drop provider, relying on a parent
+   * `CalendarDndProvider` instead. Use this when events must be draggable into
+   * targets that live outside the calendar (e.g. the assistant sidebar).
+   */
+  disableDndProvider?: boolean;
 }
 
 export function EventCalendar({
@@ -57,6 +68,8 @@ export function EventCalendar({
   externalSelectedEvent,
   onExternalSelectedEventHandled,
   onEventOpen,
+  canCreateRecurringEvents = true,
+  disableDndProvider = false,
 }: EventCalendarProps) {
   const [internalDate, setInternalDate] = useState(new Date());
   const [internalDialogOpen, setInternalDialogOpen] = useState(false);
@@ -192,9 +205,12 @@ export function EventCalendar({
     setIsEventDialogOpen(true);
   };
 
-  const handleEventSave = (event: CalendarEvent) => {
+  const handleEventSave = (
+    event: CalendarEvent,
+    recurrenceScope: RecurrenceScope,
+  ) => {
     if (event.id) {
-      onEventUpdate?.(event);
+      onEventUpdate?.(event, recurrenceScope);
     } else {
       onEventAdd?.({
         ...event,
@@ -205,8 +221,11 @@ export function EventCalendar({
     setSelectedEvent(null);
   };
 
-  const handleEventDelete = (eventId: string) => {
-    onEventDelete?.(eventId);
+  const handleEventDelete = (
+    eventId: string,
+    recurrenceScope: RecurrenceScope,
+  ) => {
+    onEventDelete?.(eventId, recurrenceScope);
     setIsEventDialogOpen(false);
     setSelectedEvent(null);
   };
@@ -234,6 +253,8 @@ export function EventCalendar({
           setIsEventDialogOpen(false);
           setSelectedEvent(null);
         }}
+        canCreateRecurringEvents={canCreateRecurringEvents}
+        disableDndProvider={disableDndProvider}
       />
     </TimeScaleProvider>
   );
@@ -254,6 +275,8 @@ function CalendarContent({
   onEventSave,
   onEventDelete,
   onDialogClose,
+  canCreateRecurringEvents,
+  disableDndProvider,
 }: {
   className?: string;
   view: CalendarView;
@@ -265,26 +288,17 @@ function CalendarContent({
   onEventSelect: (event: CalendarEvent) => void;
   onSelectionComplete: (selection: DateTimeSelection) => void;
   onEventUpdate: (event: CalendarEvent) => void;
-  onEventSave: (event: CalendarEvent) => void;
-  onEventDelete: (eventId: string) => void;
+  onEventSave: (event: CalendarEvent, recurrenceScope: RecurrenceScope) => void;
+  onEventDelete: (eventId: string, recurrenceScope: RecurrenceScope) => void;
   onDialogClose: () => void;
+  canCreateRecurringEvents: boolean;
+  disableDndProvider: boolean;
 }) {
   const { cellHeight, zoomContainerRef, zoomPercentage, resetScale } = useTimeScale();
 
-  return (
-    <div
-      className={cn("flex flex-col h-full", className)}
-      style={
-        {
-          "--event-gap": `${EventGap}px`,
-          "--event-height": `${EventHeight}px`,
-          "--week-cells-height": `${cellHeight}px`,
-        } as React.CSSProperties
-      }
-    >
-      <SelectionProvider onSelectionComplete={onSelectionComplete}>
-        <CalendarDndProvider onEventUpdate={onEventUpdate}>
-          <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
+  const content = (
+    <>
+      <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
             {view === "month" && (
               <MonthView
                 currentDate={currentDate}
@@ -348,8 +362,30 @@ function CalendarContent({
             onClose={onDialogClose}
             onDelete={onEventDelete}
             onSave={onEventSave}
+            canCreateRecurringEvents={canCreateRecurringEvents}
           />
-        </CalendarDndProvider>
+    </>
+  );
+
+  return (
+    <div
+      className={cn("flex flex-col h-full", className)}
+      style={
+        {
+          "--event-gap": `${EventGap}px`,
+          "--event-height": `${EventHeight}px`,
+          "--week-cells-height": `${cellHeight}px`,
+        } as React.CSSProperties
+      }
+    >
+      <SelectionProvider onSelectionComplete={onSelectionComplete}>
+        {disableDndProvider ? (
+          content
+        ) : (
+          <CalendarDndProvider onEventUpdate={onEventUpdate}>
+            {content}
+          </CalendarDndProvider>
+        )}
       </SelectionProvider>
     </div>
   );
