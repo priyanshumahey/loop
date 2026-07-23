@@ -7,12 +7,17 @@ import {
   copyCalendarEventResource,
   deleteCalendarEvent,
   getCalendarEvent,
+  getGmailAttachment,
+  getGmailMessage,
+  getGmailThread,
   insertCalendarEvent,
   insertCalendarEventResource,
   listCalendarEvents,
+  listGmailMessages,
   patchCalendarEvent,
   patchCalendarEventRecurrence,
   type CalendarTokens,
+  type GmailMessage,
   type GoogleEventInput,
   type RefreshedTokens,
 } from '@/lib/google'
@@ -96,6 +101,80 @@ async function saveRefreshed(db: Db, userId: string, refreshed?: RefreshedTokens
 
 export async function isGoogleConnected(db: Db, userId: string): Promise<boolean> {
   return (await getGoogleTokens(db, userId)) !== null
+}
+
+/**
+ * List the user's most recent inbox messages straight from Gmail. Returns
+ * `connected: false` (and an empty list) when the user has not linked Google,
+ * so callers can render a connect prompt instead of erroring.
+ */
+export async function listInboxEmails(
+  db: Db,
+  userId: string,
+  opts: {
+    maxResults?: number
+    query?: string
+    pageToken?: string
+    includeAllMail?: boolean
+  } = {}
+): Promise<{ connected: boolean; messages: GmailMessage[]; nextPageToken: string | null }> {
+  const tokens = await getGoogleTokens(db, userId)
+  if (!tokens) return { connected: false, messages: [], nextPageToken: null }
+
+  const { messages, nextPageToken, refreshed } = await listGmailMessages(tokens, opts)
+  await saveRefreshed(db, userId, refreshed)
+
+  return { connected: true, messages, nextPageToken }
+}
+
+/** Fetch a single inbox message in full (parsed text/HTML body). */
+export async function getInboxEmail(
+  db: Db,
+  userId: string,
+  messageId: string
+): Promise<{ connected: boolean; message: GmailMessage | null }> {
+  const tokens = await getGoogleTokens(db, userId)
+  if (!tokens) return { connected: false, message: null }
+
+  const { message, refreshed } = await getGmailMessage(tokens, messageId)
+  await saveRefreshed(db, userId, refreshed)
+
+  return { connected: true, message }
+}
+
+/** Fetch every message in a conversation thread (each parsed in full). */
+export async function getInboxThread(
+  db: Db,
+  userId: string,
+  threadId: string
+): Promise<{ connected: boolean; messages: GmailMessage[] }> {
+  const tokens = await getGoogleTokens(db, userId)
+  if (!tokens) return { connected: false, messages: [] }
+
+  const { messages, refreshed } = await getGmailThread(tokens, threadId)
+  await saveRefreshed(db, userId, refreshed)
+
+  return { connected: true, messages }
+}
+
+/** Download an attachment's bytes (base64url) from a message. */
+export async function getInboxAttachment(
+  db: Db,
+  userId: string,
+  messageId: string,
+  attachmentId: string
+): Promise<{ connected: boolean; data: string | null }> {
+  const tokens = await getGoogleTokens(db, userId)
+  if (!tokens) return { connected: false, data: null }
+
+  const { data, refreshed } = await getGmailAttachment(
+    tokens,
+    messageId,
+    attachmentId
+  )
+  await saveRefreshed(db, userId, refreshed)
+
+  return { connected: true, data }
 }
 
 /**

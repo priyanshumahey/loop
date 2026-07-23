@@ -246,9 +246,15 @@ export function ProposedChange({
           </button>
         </div>
       ) : (
-        <div className="mt-0.5 flex items-center gap-2 text-[12px] text-muted-foreground">
-          <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" />
-          {state === "approval-responded" ? "Applying…" : "Preparing…"}
+        <div className="mt-0.5 flex items-center gap-2">
+          <span className="flex gap-0.5">
+            <span className="size-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
+            <span className="size-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
+            <span className="size-1 animate-bounce rounded-full bg-muted-foreground" />
+          </span>
+          <span className="loop-shimmer text-[12px] font-medium">
+            {state === "approval-responded" ? "Applying…" : "Preparing…"}
+          </span>
         </div>
       )}
     </div>

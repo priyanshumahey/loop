@@ -11,4 +11,14 @@ const provider = createOpenAI({
 })
 
 /** The calendar agent's model. `.chat()` forces the chat-completions API. */
-export const calModel = provider.chat(process.env.COPILOT_MODEL ?? "gpt-5.4-mini")
+export const calModel = provider.chat(process.env.COPILOT_MODEL ?? "gpt-5.4")
+
+/**
+ * A small, fast model for lightweight side-tasks (e.g. predicting follow-up
+ * suggestions). Falls back to the main model when no mini deployment is set.
+ */
+export const suggestModel = provider.chat(
+  process.env.COPILOT_SUGGEST_MODEL ??
+    process.env.COPILOT_MODEL ??
+    "gpt-4o-mini"
+)

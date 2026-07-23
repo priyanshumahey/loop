@@ -8,10 +8,21 @@ import {
 } from "ai"
 import { format, isSameDay } from "date-fns"
 import {
+  CalendarClockIcon,
   CalendarIcon,
+  CalendarRangeIcon,
+  CalendarSearchIcon,
+  ChartColumnIcon,
   CheckIcon,
+  ChevronDownIcon,
+  ClockIcon,
   CopyIcon,
   LayersIcon,
+  ListIcon,
+  type LucideIcon,
+  MailIcon,
+  MailOpenIcon,
+  MessagesSquareIcon,
   PanelRightCloseIcon,
   PenSquareIcon,
   RefreshCwIcon,
@@ -30,6 +41,13 @@ import { LoopMark } from "@/components/loop-logo"
 import { AgendaList } from "@/components/cal/agent/agenda-list"
 import { AvailabilityCheck } from "@/components/cal/agent/availability-check"
 import { CalendarStatsCard } from "@/components/cal/agent/calendar-stats-card"
+import {
+  EmailDetailCard,
+  EmailDraftCard,
+  EmailResults,
+  EmailResultsSkeleton,
+  EmailThread,
+} from "@/components/cal/agent/email-results"
 import { EventSearchResults } from "@/components/cal/agent/event-search-results"
 import { FreeSlots } from "@/components/cal/agent/free-slots"
 import { MiniCalendar } from "@/components/cal/agent/mini-calendar"
@@ -45,6 +63,9 @@ import {
 } from "@/components/ui/popover"
 import { usePersistentState } from "@/hooks/use-persistent-state"
 import type {
+  AgentDraft,
+  AgentEmail,
+  AgentThreadMessage,
   AgentEvent,
   AvailabilityCheck as AvailabilityData,
   CalendarStats,
@@ -77,6 +98,14 @@ type SlotsOutput = {
 }
 type CalendarOutput = CalendarViewData
 type AvailabilityOutput = AvailabilityData
+type EmailListOutput = {
+  count: number
+  emails: AgentEmail[]
+  connected: boolean
+  unreadOnly: boolean
+  query?: string
+  error?: string
+}
 
 /** A calendar event attached to a message as context (dragged onto the panel). */
 export type ContextEvent = {
@@ -87,6 +116,34 @@ export type ContextEvent = {
   allDay?: boolean
   location?: string
   color?: string
+}
+
+/** A lightweight, serializable email attached to a message as context. */
+export type ContextEmail = {
+  id: string
+  threadId: string
+  from: string
+  subject: string
+  /** ISO datetime. */
+  date: string
+  snippet: string
+}
+
+/** Widen a context email back to the agent email shape for opening it. */
+function contextEmailToAgentEmail(email: ContextEmail): AgentEmail {
+  return {
+    id: email.id,
+    threadId: email.threadId,
+    from: email.from,
+    fromEmail: "",
+    subject: email.subject,
+    snippet: email.snippet,
+    date: email.date,
+    unread: false,
+    important: false,
+    starred: false,
+    category: null,
+  }
 }
 
 const COLOR_TINT: Record<string, string> = {
@@ -171,10 +228,14 @@ export function CalAgent({
   onNewChat,
   onClose,
   onOpenEvent,
+  onOpenEmail,
   onMutated,
   contextEvents = [],
   onRemoveContextEvent,
   onClearContextEvents,
+  contextEmails = [],
+  onRemoveContextEmail,
+  onClearContextEmails,
   tabBar,
   renderEmptyState,
 }: {
@@ -190,6 +251,8 @@ export function CalAgent({
   onClose?: () => void
   /** Open an event inline. When omitted, clicking navigates to /cal. */
   onOpenEvent?: (event: AgentEvent) => void
+  /** Open an email inline (used by the mail copilot). When omitted, email cards link to Gmail. */
+  onOpenEmail?: (email: AgentEmail) => void
   /** Fired when the agent successfully creates/updates/deletes an event. */
   onMutated?: (action: WriteAction, event?: AgentEvent) => void
   /** Events dragged onto the panel, pending attachment to the next message. */
@@ -198,6 +261,12 @@ export function CalAgent({
   onRemoveContextEvent?: (id: string) => void
   /** Clear all pending context events (called after a message is sent). */
   onClearContextEvents?: () => void
+  /** Emails attached from the reader, pending attachment to the next message. */
+  contextEmails?: ContextEmail[]
+  /** Remove one pending context email. */
+  onRemoveContextEmail?: (id: string) => void
+  /** Clear all pending context emails (called after a message is sent). */
+  onClearContextEmails?: () => void
   /** Optional conversation switcher rendered under the header. */
   tabBar?: React.ReactNode
   /** Custom empty state; receives a helper to send a prompt. */
@@ -250,13 +319,26 @@ export function CalAgent({
   // above the user bubble and injected into the model prompt server-side).
   const handleSend = useCallback(
     (text: string) => {
-      sendMessage({
-        text,
-        metadata: contextEvents.length ? { contextEvents } : undefined,
-      })
+      const metadata:
+        | { contextEvents?: ContextEvent[]; contextEmails?: ContextEmail[] }
+        | undefined =
+        contextEvents.length || contextEmails.length
+          ? {
+              ...(contextEvents.length ? { contextEvents } : {}),
+              ...(contextEmails.length ? { contextEmails } : {}),
+            }
+          : undefined
+      sendMessage({ text, metadata })
       onClearContextEvents?.()
+      onClearContextEmails?.()
     },
-    [sendMessage, contextEvents, onClearContextEvents]
+    [
+      sendMessage,
+      contextEvents,
+      contextEmails,
+      onClearContextEvents,
+      onClearContextEmails,
+    ]
   )
 
   // True once a turn has streamed in THIS session. Resume is ONLY for recovering
@@ -403,6 +485,60 @@ export function CalAgent({
     }
   }, [status, messages, onPersist])
 
+  // Follow-up suggestions: once a turn finishes, ask a small model to predict the
+  // user's 3 most likely next messages and show them as chips above the composer.
+  // Best-effort; keyed by the assistant message id so we fetch once per reply and
+  // the chips auto-hide as soon as a newer message becomes the last one.
+  const [suggest, setSuggest] = useState<{ id: string; items: string[] } | null>(
+    null
+  )
+  const suggestFetchedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (status !== "ready") return
+    const last = messages.at(-1)
+    if (!last || last.role !== "assistant") return
+    // Not really "done" while a tool is awaiting (or just got) approval.
+    const midApproval = last.parts?.some(
+      (p) =>
+        typeof p === "object" &&
+        p !== null &&
+        "state" in p &&
+        ((p as { state?: string }).state === "approval-requested" ||
+          (p as { state?: string }).state === "approval-responded")
+    )
+    if (midApproval) return
+    if (!assistantText(last).trim()) return
+    if (suggestFetchedRef.current === last.id) return
+    suggestFetchedRef.current = last.id
+
+    const controller = new AbortController()
+    fetch("/api/cal-agent/suggestions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        messages,
+        timezone:
+          typeof Intl !== "undefined"
+            ? Intl.DateTimeFormat().resolvedOptions().timeZone
+            : undefined,
+      }),
+    })
+      .then((r) => (r.ok ? r.json() : { suggestions: [] }))
+      .then((data: { suggestions?: unknown }) => {
+        const items = Array.isArray(data.suggestions)
+          ? data.suggestions
+              .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+              .slice(0, 3)
+          : []
+        if (items.length) setSuggest({ id: last.id, items })
+      })
+      .catch(() => {
+        // best-effort; ignore aborts and failures
+      })
+    return () => controller.abort()
+  }, [status, messages])
+
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   /** Whether the view is pinned to the bottom (auto-scroll on new content). */
@@ -464,7 +600,7 @@ export function CalAgent({
             </button>
           )}
           <h1 className="min-w-0 truncate text-[13px] font-medium text-foreground">
-            Calendar assistant
+            Loop assistant
           </h1>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -553,6 +689,7 @@ export function CalAgent({
                 streaming={isStreaming && mi === messages.length - 1}
                 isLast={mi === messages.length - 1}
                 onOpenEvent={handleOpenEvent}
+                onOpenEmail={onOpenEmail}
                 onPickSlot={(slot) =>
                   sendMessage({ text: formatSlotSelection(slot) })
                 }
@@ -599,6 +736,37 @@ export function CalAgent({
         </div>
       )}
 
+      {contextEmails.length > 0 && (
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-1.5 px-4 pt-3 pb-1.5">
+          {contextEmails.map((email) => (
+            <ContextEmailChip
+              key={email.id}
+              email={email}
+              onOpen={
+                onOpenEmail
+                  ? () => onOpenEmail(contextEmailToAgentEmail(email))
+                  : undefined
+              }
+              onRemove={
+                onRemoveContextEmail
+                  ? () => onRemoveContextEmail(email.id)
+                  : undefined
+              }
+            />
+          ))}
+        </div>
+      )}
+
+      {suggest &&
+        suggest.id === messages.at(-1)?.id &&
+        !isStreaming &&
+        !error && (
+          <FollowUpSuggestions
+            items={suggest.items}
+            onPick={(text) => sendMessage({ text })}
+          />
+        )}
+
       <ChatInput
         isStreaming={isStreaming}
         onSend={handleSend}
@@ -613,6 +781,7 @@ function MessageView({
   streaming,
   isLast,
   onOpenEvent,
+  onOpenEmail,
   onPickSlot,
   onApprove,
   onReject,
@@ -622,6 +791,7 @@ function MessageView({
   streaming?: boolean
   isLast?: boolean
   onOpenEvent?: (event: AgentEvent) => void
+  onOpenEmail?: (email: AgentEmail) => void
   onPickSlot?: (slot: FreeSlot) => void
   onApprove?: (approvalId: string) => void
   onReject?: (approvalId: string) => void
@@ -635,6 +805,9 @@ function MessageView({
     const contextEvents =
       (message.metadata as { contextEvents?: ContextEvent[] } | undefined)
         ?.contextEvents ?? []
+    const contextEmails =
+      (message.metadata as { contextEmails?: ContextEmail[] } | undefined)
+        ?.contextEmails ?? []
     return (
       <div className="flex flex-col items-end gap-1.5">
         {contextEvents.length > 0 && (
@@ -647,6 +820,21 @@ function MessageView({
                   : undefined
               }
             />
+          </div>
+        )}
+        {contextEmails.length > 0 && (
+          <div className="flex w-72 max-w-[85%] flex-col gap-1.5 pt-3">
+            {contextEmails.map((email) => (
+              <ContextEmailChip
+                key={email.id}
+                email={email}
+                onOpen={
+                  onOpenEmail
+                    ? () => onOpenEmail(contextEmailToAgentEmail(email))
+                    : undefined
+                }
+              />
+            ))}
           </div>
         )}
         <div className="max-w-[85%] rounded-2xl rounded-br-md bg-muted px-4 py-2.5 text-[15px] leading-relaxed break-words whitespace-pre-wrap text-foreground">
@@ -675,27 +863,48 @@ function MessageView({
             const query = toolPart.input?.query ?? ""
 
             if (toolPart.state === "output-available" && toolPart.output) {
-              return (
+              const out = toolPart.output
+              const card = (
                 <EventSearchResults
-                  key={i}
                   query={query}
-                  count={toolPart.output.count}
-                  events={toolPart.output.events}
-                  connected={toolPart.output.connected}
-                  error={toolPart.output.error}
+                  count={out.count}
+                  events={out.events}
+                  connected={out.connected}
+                  error={out.error}
                   onOpenEvent={onOpenEvent}
                 />
+              )
+              if (!out.connected || out.error)
+                return <div key={i}>{card}</div>
+              if (out.events.length === 0)
+                return (
+                  <ToolLine
+                    key={i}
+                    icon={CalendarSearchIcon}
+                    summary={
+                      query ? `No events for “${query}”` : "No events found"
+                    }
+                    count={0}
+                  />
+                )
+              return (
+                <ToolDisclosure
+                  key={i}
+                  icon={CalendarSearchIcon}
+                  summary={query ? `Search · “${query}”` : "Event search"}
+                  count={out.count}
+                >
+                  {card}
+                </ToolDisclosure>
               )
             }
 
             return (
-              <div
+              <ToolActivity
                 key={i}
-                className="my-2 flex items-center gap-2 text-[12px] text-muted-foreground"
-              >
-                <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" />
-                Searching{query ? ` for “${query}”` : ""}…
-              </div>
+                icon={CalendarSearchIcon}
+                label={`Searching${query ? ` for “${query}”` : ""}…`}
+              />
             )
           }
 
@@ -714,37 +923,54 @@ function MessageView({
             }
 
             return (
-              <div
+              <ToolActivity
                 key={i}
-                className="my-2 flex items-center gap-2 text-[12px] text-muted-foreground"
-              >
-                <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" />
-                Analyzing your schedule…
-              </div>
+                icon={ChartColumnIcon}
+                label="Analyzing your schedule…"
+              />
             )
           }
 
           if (part.type === "tool-listEvents") {
             const toolPart = part as { state: string; output?: ListOutput }
             if (toolPart.state === "output-available" && toolPart.output) {
-              return (
+              const out = toolPart.output
+              const card = (
                 <AgendaList
-                  key={i}
-                  events={toolPart.output.events}
-                  connected={toolPart.output.connected}
-                  error={toolPart.output.error}
+                  events={out.events}
+                  connected={out.connected}
+                  error={out.error}
                   onOpenEvent={onOpenEvent}
                 />
               )
+              if (!out.connected || out.error)
+                return <div key={i}>{card}</div>
+              if (out.events.length === 0)
+                return (
+                  <ToolLine
+                    key={i}
+                    icon={ListIcon}
+                    summary="Nothing scheduled"
+                    count={0}
+                  />
+                )
+              return (
+                <ToolDisclosure
+                  key={i}
+                  icon={ListIcon}
+                  summary="Agenda"
+                  count={out.events.length}
+                >
+                  {card}
+                </ToolDisclosure>
+              )
             }
             return (
-              <div
+              <ToolActivity
                 key={i}
-                className="my-2 flex items-center gap-2 text-[12px] text-muted-foreground"
-              >
-                <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" />
-                Loading your agenda…
-              </div>
+                icon={ListIcon}
+                label="Loading your agenda…"
+              />
             )
           }
 
@@ -761,13 +987,7 @@ function MessageView({
               ) : null
             }
             return (
-              <div
-                key={i}
-                className="my-2 flex items-center gap-2 text-[12px] text-muted-foreground"
-              >
-                <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" />
-                Refreshing event…
-              </div>
+              <ToolActivity key={i} icon={RefreshCwIcon} label="Refreshing event…" />
             )
           }
 
@@ -786,13 +1006,7 @@ function MessageView({
               )
             }
             return (
-              <div
-                key={i}
-                className="my-2 flex items-center gap-2 text-[12px] text-muted-foreground"
-              >
-                <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" />
-                Checking that time…
-              </div>
+              <ToolActivity key={i} icon={ClockIcon} label="Checking that time…" />
             )
           }
 
@@ -803,52 +1017,231 @@ function MessageView({
               output?: CalendarOutput
             }
             if (toolPart.state === "output-available" && toolPart.output) {
-              return (
+              const out = toolPart.output
+              const card = (
                 <MiniCalendar
-                  key={i}
-                  view={toolPart.output.view}
-                  rangeStart={toolPart.output.rangeStart}
-                  rangeEnd={toolPart.output.rangeEnd}
-                  events={toolPart.output.events}
-                  connected={toolPart.output.connected}
-                  error={toolPart.output.error}
+                  view={out.view}
+                  rangeStart={out.rangeStart}
+                  rangeEnd={out.rangeEnd}
+                  events={out.events}
+                  connected={out.connected}
+                  error={out.error}
                   onOpenEvent={onOpenEvent}
                 />
               )
+              if (!out.connected || out.error)
+                return <div key={i}>{card}</div>
+              return (
+                <ToolDisclosure
+                  key={i}
+                  icon={CalendarRangeIcon}
+                  summary={`${out.view.charAt(0).toUpperCase()}${out.view.slice(1)} calendar`}
+                  count={out.events.length}
+                  defaultOpen
+                >
+                  {card}
+                </ToolDisclosure>
+              )
             }
             return (
-              <div
+              <ToolActivity
                 key={i}
-                className="my-2 flex items-center gap-2 text-[12px] text-muted-foreground"
-              >
-                <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" />
-                Building your {toolPart.input?.view ?? ""} calendar…
-              </div>
+                icon={CalendarRangeIcon}
+                label={`Building your ${toolPart.input?.view ?? ""} calendar…`}
+              />
             )
           }
 
           if (part.type === "tool-findFreeSlots") {
             const toolPart = part as { state: string; output?: SlotsOutput }
             if (toolPart.state === "output-available" && toolPart.output) {
-              return (
+              const out = toolPart.output
+              const card = (
                 <FreeSlots
+                  slots={out.slots}
+                  durationMinutes={out.durationMinutes}
+                  connected={out.connected}
+                  error={out.error}
+                  onPick={onPickSlot}
+                />
+              )
+              if (!out.connected || out.error)
+                return <div key={i}>{card}</div>
+              if (out.slots.length === 0)
+                return (
+                  <ToolLine
+                    key={i}
+                    icon={CalendarClockIcon}
+                    summary="No open slots found"
+                    count={0}
+                  />
+                )
+              return (
+                <ToolDisclosure
                   key={i}
-                  slots={toolPart.output.slots}
-                  durationMinutes={toolPart.output.durationMinutes}
+                  icon={CalendarClockIcon}
+                  summary="Open time slots"
+                  count={out.slots.length}
+                  defaultOpen
+                >
+                  {card}
+                </ToolDisclosure>
+              )
+            }
+            return (
+              <ToolActivity
+                key={i}
+                icon={CalendarClockIcon}
+                label="Finding open time…"
+              />
+            )
+          }
+
+          if (part.type === "tool-listEmails") {
+            const toolPart = part as {
+              state: string
+              input?: { unreadOnly?: boolean; maxResults?: number }
+              output?: EmailListOutput
+            }
+            if (toolPart.state === "output-available" && toolPart.output) {
+              const out = toolPart.output
+              const card = (
+                <EmailResults
+                  emails={out.emails}
+                  count={out.count}
+                  connected={out.connected}
+                  unreadOnly={out.unreadOnly}
+                  query={out.query}
+                  error={out.error}
+                  onOpenEmail={onOpenEmail}
+                />
+              )
+              if (!out.connected || out.error)
+                return <div key={i}>{card}</div>
+              if (out.emails.length === 0)
+                return (
+                  <ToolLine
+                    key={i}
+                    icon={MailIcon}
+                    summary={
+                      out.query
+                        ? `No email for “${out.query}”`
+                        : out.unreadOnly
+                          ? "No unread email"
+                          : "No email found"
+                    }
+                    count={0}
+                  />
+                )
+              return (
+                <ToolDisclosure
+                  key={i}
+                  icon={MailIcon}
+                  summary={
+                    out.query
+                      ? `“${out.query}”`
+                      : out.unreadOnly
+                        ? "Unread email"
+                        : "Inbox"
+                  }
+                  count={out.count}
+                >
+                  {card}
+                </ToolDisclosure>
+              )
+            }
+            return (
+              <EmailResultsSkeleton
+                key={i}
+                label={
+                  toolPart.input?.unreadOnly
+                    ? "Checking for unread email…"
+                    : "Fetching your inbox…"
+                }
+              />
+            )
+          }
+
+          if (part.type === "tool-readEmail") {
+            const toolPart = part as {
+              state: string
+              output?: {
+                connected: boolean
+                email?: AgentThreadMessage
+                error?: string
+              }
+            }
+            if (toolPart.state === "output-available" && toolPart.output) {
+              return (
+                <EmailDetailCard
+                  key={i}
+                  email={toolPart.output.email}
                   connected={toolPart.output.connected}
                   error={toolPart.output.error}
-                  onPick={onPickSlot}
+                  onOpenEmail={onOpenEmail}
                 />
               )
             }
             return (
-              <div
+              <ToolActivity key={i} icon={MailOpenIcon} label="Opening the email…" />
+            )
+          }
+
+          if (part.type === "tool-readThread") {
+            const toolPart = part as {
+              state: string
+              output?: {
+                connected: boolean
+                count: number
+                subject?: string
+                messages: AgentThreadMessage[]
+                error?: string
+              }
+            }
+            if (toolPart.state === "output-available" && toolPart.output) {
+              const out = toolPart.output
+              const card = (
+                <EmailThread
+                  subject={out.subject}
+                  messages={out.messages}
+                  count={out.count}
+                  connected={out.connected}
+                  error={out.error}
+                  onOpenEmail={onOpenEmail}
+                />
+              )
+              if (!out.connected || out.error || out.messages.length === 0)
+                return <div key={i}>{card}</div>
+              return (
+                <ToolDisclosure
+                  key={i}
+                  icon={MessagesSquareIcon}
+                  summary={out.subject || "Conversation"}
+                  count={out.count}
+                >
+                  {card}
+                </ToolDisclosure>
+              )
+            }
+            return (
+              <ToolActivity
                 key={i}
-                className="my-2 flex items-center gap-2 text-[12px] text-muted-foreground"
-              >
-                <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" />
-                Finding open time…
-              </div>
+                icon={MessagesSquareIcon}
+                label="Reading the conversation…"
+              />
+            )
+          }
+
+          if (part.type === "tool-draftReply") {
+            const toolPart = part as {
+              state: string
+              output?: { draft: AgentDraft }
+            }
+            if (toolPart.state === "output-available" && toolPart.output) {
+              return <EmailDraftCard key={i} draft={toolPart.output.draft} />
+            }
+            return (
+              <ToolActivity key={i} icon={PenSquareIcon} label="Drafting a reply…" />
             )
           }
 
@@ -1053,6 +1446,55 @@ function ContextEventCard({
  * by the chat scroll area — it always renders fully on screen and flips side to
  * stay in view. Each row is clickable to open, and removable while composing.
  */
+function contextEmailWhen(email: ContextEmail): string {
+  const d = new Date(email.date)
+  if (Number.isNaN(d.getTime())) return ""
+  return format(d, "EEE, MMM d")
+}
+
+function ContextEmailChip({
+  email,
+  onOpen,
+  onRemove,
+}: {
+  email: ContextEmail
+  onOpen?: () => void
+  onRemove?: () => void
+}) {
+  const when = contextEmailWhen(email)
+  return (
+    <div className="relative flex items-center gap-2.5 rounded-xl border border-border/70 bg-background py-2 pr-2 pl-2 shadow-sm transition-colors hover:border-border hover:bg-muted/50">
+      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
+        <MailIcon className="size-4" />
+      </span>
+      <button
+        type="button"
+        onClick={onOpen}
+        disabled={!onOpen}
+        className="min-w-0 flex-1 text-left disabled:cursor-default"
+      >
+        <p className="truncate text-[13px] font-medium text-foreground">
+          {email.subject || "(no subject)"}
+        </p>
+        <p className="truncate text-[11px] text-muted-foreground">
+          {email.from}
+          {when ? ` · ${when}` : ""}
+        </p>
+      </button>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label="Remove attached email"
+          className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <XIcon className="size-3.5" />
+        </button>
+      )}
+    </div>
+  )
+}
+
 function ContextEventStack({
   events,
   onOpen,
@@ -1179,6 +1621,36 @@ function AgentAvatar() {
 }
 
 /** Assistant message row: avatar + name, with the content beside it. */
+/**
+ * Predicted follow-up messages, shown as horizontally scrollable chips above
+ * the composer once a turn finishes. Ordered most-likely first (leftmost).
+ */
+function FollowUpSuggestions({
+  items,
+  onPick,
+}: {
+  items: string[]
+  onPick: (text: string) => void
+}) {
+  if (!items.length) return null
+  return (
+    <div className="mx-auto w-full max-w-2xl px-4 pt-2 pb-1">
+      <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {items.map((s, i) => (
+          <button
+            key={`${i}-${s}`}
+            type="button"
+            onClick={() => onPick(s)}
+            className="group inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/70 bg-background px-3 py-1.5 text-[13px] text-foreground/80 transition-colors hover:border-ring/50 hover:bg-muted/60 hover:text-foreground"
+          >
+            <span className="whitespace-nowrap">{s}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function AgentRow({ children }: { children: React.ReactNode }) {
   return (
     <div className="group flex gap-3">
@@ -1205,6 +1677,109 @@ function ThinkingDots() {
     </div>
   )
 }
+
+/**
+ * A single running tool step: an icon tile with a soft breathing halo and a
+ * shimmering label. Used as the pending state for every tool so the agent's
+ * work reads as a clean, consistent activity feed while it streams.
+ */
+function ToolActivity({
+  icon: Icon,
+  label,
+}: {
+  icon: LucideIcon
+  label: string
+}) {
+  return (
+    <div className="my-2 flex items-center gap-2.5" aria-live="polite">
+      <span className="relative grid size-6 shrink-0 place-items-center rounded-lg bg-muted text-foreground/80 ring-1 ring-inset ring-border/60">
+        <span className="loop-halo absolute inset-0 rounded-lg bg-foreground/10" />
+        <Icon className="relative size-3.5" />
+      </span>
+      <span className="loop-shimmer text-[13px] font-medium">{label}</span>
+    </div>
+  )
+}
+
+/**
+ * A single quiet summary line for a tool result that has nothing to expand
+ * (e.g. an empty search). Reads as unobtrusive metadata in the transcript.
+ */
+function ToolLine({
+  icon: Icon,
+  summary,
+  count,
+}: {
+  icon: LucideIcon
+  summary: React.ReactNode
+  count?: number
+}) {
+  return (
+    <div className="my-1 flex items-center gap-2 px-1 py-0.5 text-muted-foreground">
+      <Icon className="size-3.5 shrink-0 opacity-70" />
+      <span className="min-w-0 flex-1 truncate text-[12.5px]">{summary}</span>
+      {typeof count === "number" && (
+        <span className="shrink-0 text-[11px] tabular-nums opacity-70">
+          {count}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Light accordion around a completed tool result. Collapsed by default so the
+ * transcript stays clean and minimal — the agent's written answer carries the
+ * summary, and the underlying sources (event lists, inboxes, calendars) sit
+ * quietly behind a one-line toggle the user can open if they want the detail.
+ */
+function ToolDisclosure({
+  icon: Icon,
+  summary,
+  count,
+  defaultOpen = false,
+  children,
+}: {
+  icon: LucideIcon
+  summary: React.ReactNode
+  count?: number
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+
+  return (
+    <div className="my-1">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="group flex w-full items-center gap-2 rounded-lg px-1 py-0.5 text-left text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <Icon className="size-3.5 shrink-0 opacity-70 transition-opacity group-hover:opacity-100" />
+        <span className="min-w-0 flex-1 truncate text-[12.5px]">{summary}</span>
+        {typeof count === "number" && (
+          <span className="shrink-0 text-[11px] tabular-nums opacity-70">
+            {count}
+          </span>
+        )}
+        <ChevronDownIcon
+          className={cn(
+            "size-3.5 shrink-0 opacity-50 transition-all duration-200 group-hover:opacity-100",
+            open && "rotate-180"
+          )}
+        />
+      </button>
+      {open && (
+        <div className="mt-0.5 ml-[7px] border-l border-border/50 pl-3">
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 
 /** Assistant markdown; text is smoothed while streaming so it reads as a steady flow. */
 function AssistantText({

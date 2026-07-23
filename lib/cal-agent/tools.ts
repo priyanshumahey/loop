@@ -22,7 +22,13 @@ import {
   getEvents,
   updateEvent as dbUpdateEvent,
 } from "@/lib/db/events"
-import { isGoogleConnected, pullGoogleEvents } from "@/lib/google-sync"
+import {
+  getInboxEmail,
+  getInboxThread,
+  isGoogleConnected,
+  listInboxEmails,
+  pullGoogleEvents,
+} from "@/lib/google-sync"
 import { createClient } from "@/lib/supabase/server"
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -39,6 +45,33 @@ export interface AgentEvent {
   color: string | null
   recurringEventId: string | null
   originalStart: string | null
+}
+
+/** Gmail's inbox category tabs, normalized. */
+export type EmailCategory =
+  | "primary"
+  | "social"
+  | "promotions"
+  | "updates"
+  | "forums"
+
+/** A compact email shape returned to the model and rendered by the UI. */
+export interface AgentEmail {
+  id: string
+  threadId: string
+  from: string
+  fromEmail: string
+  subject: string
+  snippet: string
+  /** ISO datetime when parseable, otherwise the raw `Date` header. */
+  date: string
+  unread: boolean
+  /** Whether Gmail flagged the message as important. */
+  important: boolean
+  /** Whether the user has starred the message. */
+  starred: boolean
+  /** Which inbox tab Gmail sorted it into, when known. */
+  category: EmailCategory | null
 }
 
 /** Per-day meeting-hours breakdown for the stats card. */
@@ -922,6 +955,406 @@ const deleteEvent = tool({
  * `showCalendar` derives day/week/month boundaries on the user's calendar day
  * (not the server's UTC day).
  */
+// ---------------------------------------------------------------------------
+// Email (Gmail)
+// ---------------------------------------------------------------------------
+
+/** Split an RFC 5322 address header into a display name and bare address. */
+function parseSender(header: string): { name: string; email: string } {
+  const trimmed = (header ?? "").trim()
+  const match = trimmed.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/)
+  if (match) {
+    const name = match[1].trim()
+    const email = match[2].trim()
+    return { name: name || email, email }
+  }
+  return { name: trimmed, email: trimmed }
+}
+
+/** Normalize Gmail's CATEGORY_* labels into a single inbox tab. */
+function gmailCategory(labels: string[]): EmailCategory | null {
+  if (labels.includes("CATEGORY_SOCIAL")) return "social"
+  if (labels.includes("CATEGORY_PROMOTIONS")) return "promotions"
+  if (labels.includes("CATEGORY_UPDATES")) return "updates"
+  if (labels.includes("CATEGORY_FORUMS")) return "forums"
+  if (labels.includes("CATEGORY_PERSONAL")) return "primary"
+  return null
+}
+
+/** Map a fetched Gmail message to the compact shape the model + UI use. */
+function toAgentEmail(msg: {
+  id: string
+  threadId: string
+  from: string
+  subject: string
+  snippet: string
+  date: string
+  unread: boolean
+  labels: string[]
+}): AgentEmail {
+  const sender = parseSender(msg.from)
+  const parsed = new Date(msg.date)
+  return {
+    id: msg.id,
+    threadId: msg.threadId,
+    from: sender.name,
+    fromEmail: sender.email,
+    subject: msg.subject || "(no subject)",
+    snippet: msg.snippet,
+    date: Number.isNaN(parsed.getTime()) ? msg.date : parsed.toISOString(),
+    unread: msg.unread,
+    important: msg.labels.includes("IMPORTANT"),
+    starred: msg.labels.includes("STARRED"),
+    category: gmailCategory(msg.labels),
+  }
+}
+
+/** Resolve the authenticated user's Supabase client and id (or null). */
+async function currentUser(): Promise<{
+  supabase: Awaited<ReturnType<typeof createClient>>
+  userId: string
+} | null> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return null
+  return { supabase, userId: user.id }
+}
+
+/** Normalize a date-ish input to Gmail's `YYYY/MM/DD` query format. */
+function toGmailDate(value: string): string | null {
+  const trimmed = value.trim()
+  // Already a bare calendar date (YYYY-MM-DD or YYYY/MM/DD).
+  const bare = trimmed.match(/^(\d{4})[-/](\d{2})[-/](\d{2})$/)
+  if (bare) return `${bare[1]}/${bare[2]}/${bare[3]}`
+  const parsed = new Date(trimmed)
+  if (Number.isNaN(parsed.getTime())) return null
+  const y = parsed.getFullYear()
+  const m = String(parsed.getMonth() + 1).padStart(2, "0")
+  const d = String(parsed.getDate()).padStart(2, "0")
+  return `${y}/${m}/${d}`
+}
+
+/** Compile structured email filters (plus a raw escape hatch) into a Gmail query. */
+function buildGmailQuery(opts: {
+  unreadOnly?: boolean
+  from?: string
+  subject?: string
+  after?: string
+  before?: string
+  hasAttachment?: boolean
+  category?: EmailCategory
+  query?: string
+}): string {
+  const parts: string[] = []
+  if (opts.unreadOnly) parts.push("is:unread")
+  if (opts.from) parts.push(`from:(${opts.from.trim()})`)
+  if (opts.subject) parts.push(`subject:(${opts.subject.trim()})`)
+  if (opts.hasAttachment) parts.push("has:attachment")
+  if (opts.category) parts.push(`category:${opts.category}`)
+  if (opts.after) {
+    const d = toGmailDate(opts.after)
+    if (d) parts.push(`after:${d}`)
+  }
+  if (opts.before) {
+    const d = toGmailDate(opts.before)
+    if (d) parts.push(`before:${d}`)
+  }
+  if (opts.query?.trim()) parts.push(opts.query.trim())
+  return parts.join(" ")
+}
+
+/**
+ * List messages from the user's Gmail inbox. Supports fetching the most recent
+ * N messages, unread-only, structured filters, or a raw Gmail query. Read-only.
+ */
+const listEmails = tool({
+  description:
+    "List or search the user's Gmail. Use this whenever the user " +
+    "asks to see, get, fetch, find, look up, triage, or summarize their emails " +
+    "— e.g. 'show my last 100 emails', 'any unread mail?', 'emails from Stripe " +
+    "last week', 'find the Onos Health thread', 'what needs a reply'. When a " +
+    "from, subject, or raw query filter is given, this searches ALL of the " +
+    "user's mail (including archived and sent messages under every label — Spam " +
+    "and Trash excluded), not just the inbox, so a specific message is found " +
+    "even after it's been archived. Prefer the structured filters (from, " +
+    "subject, after, " +
+    "my last 100 emails', 'any unread mail?', 'emails from Stripe last week', " +
+    "'what needs a reply'. Prefer the structured filters (from, subject, after, " +
+    "before, hasAttachment, category, unreadOnly) over the raw query field; use " +
+    "query only for advanced Gmail operators. Dates go in after/before as " +
+    "YYYY-MM-DD. Each result includes unread/important/starred/category signals " +
+    "you can use to triage.",
+  inputSchema: z.object({
+    maxResults: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe("How many messages to fetch (1–100). Defaults to 20."),
+    unreadOnly: z
+      .boolean()
+      .optional()
+      .describe("When true, only return unread messages."),
+    from: z
+      .string()
+      .optional()
+      .describe("Filter by sender name or address, e.g. 'stripe' or 'boss@acme.com'."),
+    subject: z
+      .string()
+      .optional()
+      .describe("Filter by words in the subject, e.g. 'invoice'."),
+    after: z
+      .string()
+      .optional()
+      .describe("Only messages on/after this date (YYYY-MM-DD)."),
+    before: z
+      .string()
+      .optional()
+      .describe("Only messages before this date (YYYY-MM-DD)."),
+    hasAttachment: z
+      .boolean()
+      .optional()
+      .describe("When true, only messages that have attachments."),
+    category: z
+      .enum(["primary", "social", "promotions", "updates", "forums"])
+      .optional()
+      .describe("Limit to a Gmail inbox tab/category."),
+    query: z
+      .string()
+      .optional()
+      .describe(
+        "Advanced escape hatch: raw Gmail search operators, e.g. 'is:starred', " +
+          "'newer_than:2d', 'label:work'. Combined with the structured filters."
+      ),
+  }),
+  execute: async ({
+    maxResults,
+    unreadOnly,
+    from,
+    subject,
+    after,
+    before,
+    hasAttachment,
+    category,
+    query,
+  }): Promise<{
+    count: number
+    emails: AgentEmail[]
+    connected: boolean
+    unreadOnly: boolean
+    query?: string
+    error?: string
+  }> => {
+    const auth = await currentUser()
+    if (!auth) {
+      return {
+        count: 0,
+        emails: [],
+        connected: false,
+        unreadOnly: Boolean(unreadOnly),
+      }
+    }
+
+    const gmailQuery = buildGmailQuery({
+      unreadOnly,
+      from,
+      subject,
+      after,
+      before,
+      hasAttachment,
+      category,
+      query,
+    })
+
+    // When the user is looking for a specific message (by sender, subject, or
+    // raw query), search all mail rather than just the inbox so archived/sent
+    // messages are found too. Plain inbox listings stay inbox-only.
+    const includeAllMail = Boolean(
+      from?.trim() || subject?.trim() || query?.trim()
+    )
+
+    try {
+      const { connected, messages } = await listInboxEmails(
+        auth.supabase,
+        auth.userId,
+        {
+          maxResults: maxResults ?? 20,
+          query: gmailQuery || undefined,
+          includeAllMail,
+        }
+      )
+      const emails = messages.map(toAgentEmail)
+      return {
+        count: emails.length,
+        emails,
+        connected,
+        unreadOnly: Boolean(unreadOnly),
+        query: gmailQuery || undefined,
+      }
+    } catch (error) {
+      return {
+        count: 0,
+        emails: [],
+        connected: true,
+        unreadOnly: Boolean(unreadOnly),
+        query: gmailQuery || undefined,
+        error: error instanceof Error ? error.message : "Failed to load emails",
+      }
+    }
+  },
+})
+
+/**
+ * Read one email in full, including its body text. Use after listEmails when
+ * the user wants the contents of a specific message. Read-only.
+ */
+const readEmail = tool({
+  description:
+    "Fetch the full contents (including body) of a single Gmail message by its " +
+    "id. Use this after listEmails when the user wants to read or summarize a " +
+    "specific email. Reuse the id from a prior listEmails result.",
+  inputSchema: z.object({
+    emailId: z.string().describe("The Gmail message id to read."),
+  }),
+  execute: async ({
+    emailId,
+  }): Promise<{
+    connected: boolean
+    email?: AgentEmail & { body: string }
+    error?: string
+  }> => {
+    const auth = await currentUser()
+    if (!auth) return { connected: false }
+
+    try {
+      const { connected, message } = await getInboxEmail(
+        auth.supabase,
+        auth.userId,
+        emailId
+      )
+      if (!connected) return { connected: false }
+      if (!message) return { connected: true, error: "Email not found" }
+
+      const body = message.bodyText || message.snippet
+      return {
+        connected: true,
+        email: { ...toAgentEmail(message), body },
+      }
+    } catch (error) {
+      return {
+        connected: true,
+        error: error instanceof Error ? error.message : "Failed to read email",
+      }
+    }
+  },
+})
+
+/** One message within a thread, in the compact agent shape plus its body. */
+export type AgentThreadMessage = AgentEmail & { body: string }
+
+/**
+ * Read a whole conversation thread (all messages, oldest → newest) with each
+ * body included. Use when the user wants the full back-and-forth, not just one
+ * message. Read-only.
+ */
+const readThread = tool({
+  description:
+    "Fetch every message in a Gmail conversation thread (oldest to newest), " +
+    "each with its body, so you can summarize or answer questions about the " +
+    "whole exchange. Use the threadId from a prior listEmails or readEmail " +
+    "result when the user asks about a conversation, reply chain, or 'the " +
+    "whole thread'.",
+  inputSchema: z.object({
+    threadId: z.string().describe("The Gmail thread id to read."),
+  }),
+  execute: async ({
+    threadId,
+  }): Promise<{
+    connected: boolean
+    count: number
+    subject?: string
+    messages: AgentThreadMessage[]
+    error?: string
+  }> => {
+    const auth = await currentUser()
+    if (!auth) return { connected: false, count: 0, messages: [] }
+
+    try {
+      const { connected, messages } = await getInboxThread(
+        auth.supabase,
+        auth.userId,
+        threadId
+      )
+      if (!connected) return { connected: false, count: 0, messages: [] }
+
+      const mapped: AgentThreadMessage[] = messages.map((m) => ({
+        ...toAgentEmail(m),
+        body: m.bodyText || m.snippet,
+      }))
+      return {
+        connected: true,
+        count: mapped.length,
+        subject: mapped[0]?.subject,
+        messages: mapped,
+      }
+    } catch (error) {
+      return {
+        connected: true,
+        count: 0,
+        messages: [],
+        error: error instanceof Error ? error.message : "Failed to read thread",
+      }
+    }
+  },
+})
+
+/** A reply the assistant composed, shown as a read-only email-style card. */
+export interface AgentDraft {
+  to: string
+  subject: string
+  body: string
+}
+
+/**
+ * Compose a draft reply and surface it as an email-styled card. Does NOT send —
+ * loop has no send capability; this gives the user a ready-to-copy starting
+ * point. Read-only.
+ */
+const draftReply = tool({
+  description:
+    "Compose a draft reply to an email and show it as an email-style card. Use " +
+    "when the user asks to draft, write, or reply to a message. FIRST read the " +
+    "email or thread (readEmail / readThread) so the draft has real context, " +
+    "then call this with a composed to, subject, and body. This does NOT send " +
+    "the email — it presents a copy-ready draft. Write the body in the user's " +
+    "voice: concise, professional, and specific to the message being answered.",
+  inputSchema: z.object({
+    to: z
+      .string()
+      .describe(
+        "Recipient address(es), comma-separated. Usually the sender of the email being replied to."
+      ),
+    subject: z
+      .string()
+      .describe("Subject line, e.g. 'Re: <original subject>'."),
+    body: z
+      .string()
+      .describe(
+        "The full reply body as plain text, ready to send — greeting, message, and sign-off."
+      ),
+  }),
+  execute: async ({
+    to,
+    subject,
+    body,
+  }): Promise<{ draft: AgentDraft }> => {
+    return { draft: { to, subject, body } }
+  },
+})
+
 export function buildCalendarTools(timeZone?: string) {
   return {
     searchEvents,
@@ -934,6 +1367,10 @@ export function buildCalendarTools(timeZone?: string) {
     createEvent: makeCreateEvent(timeZone),
     updateEvent,
     deleteEvent,
+    listEmails,
+    readEmail,
+    readThread,
+    draftReply,
   }
 }
 

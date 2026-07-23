@@ -13,6 +13,7 @@ import {
 const CONV_KEY = "loop:agent:conversations"
 const ACTIVE_KEY = "loop:agent:active"
 const OPEN_KEY = "loop:agent:open"
+const FAV_KEY = "loop:agent:favorites"
 const MAX_CONVERSATIONS = 40
 
 export interface AgentConversation {
@@ -52,12 +53,21 @@ function deriveTitle(messages: UIMessage[]): string {
  * A "new chat" is a fresh draft id that is NOT written to storage until its
  * first turn completes — so empty drafts never clutter the list, and switching
  * conversations (which remounts the agent) never happens mid-stream.
+ *
+ * When `syncUrl` is set, the active conversation id is mirrored to the `?c=<id>`
+ * query param so each chat has its own URL — opening `/home?c=<id>` (e.g. in a
+ * new browser tab) restores that conversation.
  */
-export function useAgentConversations() {
+export function useAgentConversations(
+  options: { syncUrl?: boolean; initialChatId?: string } = {}
+) {
+  const { syncUrl = false, initialChatId } = options
   const [conversations, setConversations] = useState<AgentConversation[]>([])
   const [activeId, setActiveId] = useState<string>("")
   /** Conversations currently open as tabs, in tab order. */
   const [openIds, setOpenIds] = useState<string[]>([])
+  /** Ids the user has pinned as favorites. */
+  const [favoriteIds, setFavoriteIds] = useState<string[]>([])
   const [hydrated, setHydrated] = useState(false)
 
   // Restore from storage on mount.
@@ -88,10 +98,22 @@ export function useAgentConversations() {
     } catch {
       // ignore
     }
-    // Keep the stored active id even when it's an unsaved draft, so the
-    // conversation id stays stable across a refresh — otherwise an in-flight
+
+    let favorites: string[] = []
+    try {
+      const raw = localStorage.getItem(FAV_KEY)
+      const parsed = raw ? JSON.parse(raw) : null
+      if (Array.isArray(parsed)) favorites = parsed.filter((id) => existing.has(id))
+    } catch {
+      // ignore
+    }
+    setFavoriteIds(favorites)
+
+    // Prefer an id from the URL (e.g. a shared or opened-in-new-tab chat link),
+    // then fall back to the stored active id even when it's an unsaved draft, so
+    // the conversation id stays stable across a refresh — otherwise an in-flight
     // stream can't be resumed (its id would change on every reload).
-    const restoredActive = active || uid()
+    const restoredActive = (syncUrl && initialChatId) || active || uid()
     if (existing.has(restoredActive) && !open.includes(restoredActive)) {
       open = [...open, restoredActive]
     }
@@ -151,6 +173,15 @@ export function useAgentConversations() {
   }, [openIds, hydrated])
 
   useEffect(() => {
+    if (!hydrated) return
+    try {
+      localStorage.setItem(FAV_KEY, JSON.stringify(favoriteIds))
+    } catch {
+      // ignore
+    }
+  }, [favoriteIds, hydrated])
+
+  useEffect(() => {
     if (!hydrated || !activeId) return
     try {
       localStorage.setItem(ACTIVE_KEY, activeId)
@@ -158,6 +189,15 @@ export function useAgentConversations() {
       // ignore
     }
   }, [activeId, hydrated])
+
+  // Mirror the active conversation to the URL so each chat has its own address.
+  useEffect(() => {
+    if (!syncUrl || !hydrated || !activeId) return
+    const url = new URL(window.location.href)
+    if (url.searchParams.get("c") === activeId) return
+    url.searchParams.set("c", activeId)
+    window.history.replaceState(window.history.state, "", url)
+  }, [syncUrl, hydrated, activeId])
 
   const activeConversation = useMemo(
     () => conversations.find((c) => c.id === activeId) ?? null,
@@ -199,8 +239,16 @@ export function useAgentConversations() {
   const remove = useCallback((id: string) => {
     setConversations((prev) => prev.filter((c) => c.id !== id))
     setOpenIds((prev) => prev.filter((openId) => openId !== id))
+    setFavoriteIds((prev) => prev.filter((favId) => favId !== id))
     setActiveId((prev) => (prev === id ? uid() : prev))
     void deleteConversationDb(id)
+  }, [])
+
+  /** Pin/unpin a conversation to the Favorites section. */
+  const toggleFavorite = useCallback((id: string) => {
+    setFavoriteIds((prev) =>
+      prev.includes(id) ? prev.filter((favId) => favId !== id) : [id, ...prev]
+    )
   }, [])
 
   const rename = useCallback((id: string, title: string) => {
@@ -252,6 +300,7 @@ export function useAgentConversations() {
     activeId,
     activeConversation,
     openConversations,
+    favoriteIds,
     isDraft,
     hydrated,
     newChat,
@@ -259,6 +308,7 @@ export function useAgentConversations() {
     closeTab,
     remove,
     rename,
+    toggleFavorite,
     persist,
   }
 }

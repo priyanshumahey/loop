@@ -3,7 +3,11 @@ import { redirect } from "next/navigation"
 import { ChatHome } from "@/components/chat/chat-home"
 import { createClient } from "@/lib/supabase/server"
 
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ c?: string }>
+}) {
   const supabase = await createClient()
   const {
     data: { user },
@@ -11,5 +15,6 @@ export default async function HomePage() {
 
   if (!user) redirect("/")
 
-  return <ChatHome />
+  const { c } = await searchParams
+  return <ChatHome initialChatId={c} />
 }

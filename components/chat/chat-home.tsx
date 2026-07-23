@@ -5,18 +5,20 @@ import { ChatSidebar } from "@/components/chat/chat-sidebar"
 import { HomeBriefing } from "@/components/chat/home-briefing"
 import { useAgentConversations } from "@/hooks/use-agent-conversations"
 
-export function ChatHome() {
-  const store = useAgentConversations()
+export function ChatHome({ initialChatId }: { initialChatId?: string }) {
+  const store = useAgentConversations({ syncUrl: true, initialChatId })
 
   return (
     <div className="flex h-svh w-full overflow-hidden bg-muted/40">
       <ChatSidebar
         conversations={store.conversations}
         activeId={store.activeId}
+        favoriteIds={store.favoriteIds}
         onNewChat={store.newChat}
         onSelect={store.select}
         onDelete={store.remove}
         onRename={store.rename}
+        onToggleFavorite={store.toggleFavorite}
       />
       <main className="min-w-0 flex-1 p-2 pl-0">
         <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border/70 bg-background shadow-sm">

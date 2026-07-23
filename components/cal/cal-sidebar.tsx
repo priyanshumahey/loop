@@ -5,18 +5,13 @@ import {
   CalendarIcon,
   ChevronRightIcon,
   ClockIcon,
-  PanelLeftCloseIcon,
-  PanelLeftOpenIcon,
   PlusIcon,
-  SparklesIcon,
 } from "lucide-react"
-import Link from "next/link"
 import { useMemo } from "react"
 
+import { AppSidebar } from "@/components/app-sidebar"
 import type { CalendarEvent, EventColor } from "@/components/event-calendar/types"
-import { LoopMark } from "@/components/loop-logo"
 import { SidebarCalendar } from "@/components/cal/sidebar-calendar"
-import { UserAccount } from "@/components/user-account"
 import { usePersistentState } from "@/hooks/use-persistent-state"
 import { cn } from "@/lib/utils"
 
@@ -121,43 +116,10 @@ export function CalSidebar({
     [todayEvents]
   )
 
-  const [collapsed, setCollapsed] = usePersistentState(
-    "loop:cal:sidebar-collapsed",
-    false
-  )
-
-  if (collapsed) {
-    return (
-      <div className="flex h-svh w-14 shrink-0 flex-col items-center gap-2 px-2 py-3">
-        <span className="grid size-7 place-items-center rounded-lg bg-foreground text-background">
-          <LoopMark className="h-4 w-[13px]" />
-        </span>
-        <button
-          type="button"
-          onClick={() => setCollapsed(false)}
-          title="Expand sidebar"
-          className="grid size-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <PanelLeftOpenIcon className="size-4" />
-        </button>
-
-        {/* View switcher */}
-        <div className="mt-1 flex flex-col items-center gap-1 rounded-xl bg-muted/70 p-1">
-          <Link
-            href="/home"
-            title="Chat"
-            className="grid size-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <SparklesIcon className="size-4" />
-          </Link>
-          <span
-            title="Calendar"
-            className="grid size-8 place-items-center rounded-lg bg-background text-foreground shadow-sm"
-          >
-            <CalendarIcon className="size-4" />
-          </span>
-        </div>
-
+  return (
+    <AppSidebar
+      active="calendar"
+      railAction={
         <button
           type="button"
           onClick={onNewEvent}
@@ -166,49 +128,8 @@ export function CalSidebar({
         >
           <PlusIcon className="size-4" />
         </button>
-
-        <div className="mt-auto border-t border-border/60 pt-2">
-          <UserAccount collapsed />
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <aside className="flex h-svh w-[264px] shrink-0 flex-col gap-1 px-3 py-3 text-sidebar-foreground">
-      {/* Brand */}
-      <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
-        <div className="flex items-center gap-2">
-          <span className="grid size-7 place-items-center rounded-lg bg-foreground text-background">
-            <LoopMark className="h-4 w-[13px]" />
-          </span>
-          <span className="font-heading text-[15px] font-semibold tracking-tight">Loop</span>
-        </div>
-        <button
-          type="button"
-          onClick={() => setCollapsed(true)}
-          title="Collapse sidebar"
-          className="grid size-7 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <PanelLeftCloseIcon className="size-4" />
-        </button>
-      </div>
-
-      {/* View switcher */}
-      <div className="flex items-center gap-1 rounded-xl bg-muted/70 p-1">
-        <Link
-          href="/home"
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <SparklesIcon className="size-3.5" />
-          Chat
-        </Link>
-        <span className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-background px-2.5 py-1.5 text-[13px] font-medium text-foreground shadow-sm">
-          <CalendarIcon className="size-3.5" />
-          Calendar
-        </span>
-      </div>
-
+      }
+    >
       {/* New event */}
       <button
         type="button"
@@ -259,12 +180,7 @@ export function CalSidebar({
           )}
         </Section>
       </div>
-
-      {/* Account */}
-      <div className="mt-1 border-t border-border/60 pt-1">
-        <UserAccount />
-      </div>
-    </aside>
+    </AppSidebar>
   )
 }
 
