@@ -2,13 +2,9 @@ import type {
   CalendarEvent,
   RecurrenceScope,
 } from '@/components/event-calendar/types'
+import type { ApiResponse } from '@/lib/api/types'
 
 const API_BASE = '/api/events'
-
-interface ApiResponse<T> {
-  data?: T
-  error?: string
-}
 
 type SerializedEvent = Record<string, unknown>
 
