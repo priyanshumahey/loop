@@ -79,3 +79,12 @@ export function attachmentUrl(
   })
   return `${API_BASE}/${messageId}/attachments/${att.attachmentId}?${params.toString()}`
 }
+
+/** Build an inline (renderable) URL for a message's embedded image attachment. */
+export function inlineImageUrl(
+  messageId: string,
+  att: { attachmentId: string; mimeType: string }
+): string {
+  const params = new URLSearchParams({ type: att.mimeType, inline: '1' })
+  return `${API_BASE}/${messageId}/attachments/${att.attachmentId}?${params.toString()}`
+}

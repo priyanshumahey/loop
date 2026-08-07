@@ -13,11 +13,15 @@ function sanitizeFilename(name: string): string {
 }
 
 /**
- * GET /api/emails/[id]/attachments/[attachmentId]?name=...&type=...
- * Streams a Gmail attachment's bytes back as a download. The message id and
- * attachment id come from the message's parsed attachment list; name and type
- * are passed through for the download prompt. Always served as an attachment
- * (never rendered inline) so untrusted content can't execute in this origin.
+ * GET /api/emails/[id]/attachments/[attachmentId]?name=...&type=...&inline=1
+ * Streams a Gmail attachment's bytes back. The message id and attachment id
+ * come from the message's parsed attachment list; name and type are passed
+ * through for the download prompt.
+ *
+ * By default it's served as a download (Content-Disposition: attachment) so
+ * untrusted content can't execute in this origin. `inline=1` serves it inline
+ * instead — used only to render a message's own embedded (cid:) images — and is
+ * restricted to image types so nothing else can be framed inline.
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   const { id, attachmentId } = await params
@@ -34,6 +38,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   const { searchParams } = new URL(request.url)
   const filename = sanitizeFilename(searchParams.get('name') ?? 'attachment')
   const mimeType = searchParams.get('type') || 'application/octet-stream'
+  // Only images may be served inline; everything else is forced to download.
+  const inline = searchParams.get('inline') === '1' && mimeType.startsWith('image/')
 
   try {
     const { connected, data } = await getInboxAttachment(
@@ -54,9 +60,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       headers: {
         'Content-Type': mimeType,
         'Content-Length': String(bytes.byteLength),
-        'Content-Disposition': `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(
-          filename
-        )}`,
+        'Content-Disposition': inline
+          ? 'inline'
+          : `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(
+              filename
+            )}`,
         'Cache-Control': 'private, max-age=3600',
       },
     })
