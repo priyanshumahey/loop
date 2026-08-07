@@ -17,18 +17,20 @@ import { toContextEvent, type ContextEvent } from "@/components/cal/cal-agent"
 import { AgendaDaysToShow } from "@/components/event-calendar/constants"
 import { CalendarDndProvider } from "@/components/event-calendar/calendar-dnd-context"
 import { EventCalendar } from "@/components/event-calendar"
+import { ScheduleView } from "@/components/scheduling/schedule-view"
 import type {
   CalendarEvent,
   CalendarView,
   RecurrenceScope,
 } from "@/components/event-calendar/types"
-import { Toaster } from "@/components/ui/sonner"
 import { Spinner } from "@/components/ui/loading-screen"
 import type { AgentEvent } from "@/lib/cal-agent/tools"
+import { useAvailability } from "@/hooks/use-availability"
 import { useEvents } from "@/hooks/use-events"
 import { useRecentEvents } from "@/hooks/use-recent-events"
 
 export default function CalPage() {
+  const [mode, setMode] = useState<"calendar" | "schedule">("calendar")
   const [view, setView] = useState<CalendarView>("week")
   const [currentDate, setCurrentDate] = useState(() => new Date())
   const [isEventDialogOpen, setIsEventDialogOpen] = useState(false)
@@ -38,12 +40,22 @@ export default function CalPage() {
   const [contextEvents, setContextEvents] = useState<ContextEvent[]>([])
   const { recentEvents, record: recordRecentEvent } = useRecentEvents()
 
+  const availabilityStart = useMemo(
+    () => startOfWeek(currentDate),
+    [currentDate]
+  )
+  const availabilityEnd = useMemo(
+    () => addDays(endOfWeek(currentDate), 1),
+    [currentDate]
+  )
+  const availability = useAvailability(availabilityStart, availabilityEnd)
+
   // The window of events to keep synced with Google, padded a week on each side
   // so events bleeding past the visible edges still load.
   const { rangeStart, rangeEnd } = useMemo(() => {
     let start: Date
     let end: Date
-    switch (view) {
+    switch (mode === "schedule" ? "week" : view) {
       case "month":
         start = startOfMonth(currentDate)
         end = endOfMonth(currentDate)
@@ -62,7 +74,7 @@ export default function CalPage() {
         break
     }
     return { rangeStart: addDays(start, -7), rangeEnd: addDays(end, 7) }
-  }, [view, currentDate])
+  }, [view, currentDate, mode])
 
   const {
     events,
@@ -196,6 +208,12 @@ export default function CalPage() {
           recentEvents={recentEvents}
           onDateChange={setCurrentDate}
           onNewEvent={() => setIsEventDialogOpen(true)}
+          mode={mode}
+          onSchedule={() =>
+            setMode((current) =>
+              current === "calendar" ? "schedule" : "calendar"
+            )
+          }
           onOpenEvent={handleOpenEvent}
         />
         <main className="flex min-w-0 flex-1 flex-col p-2 pl-0">
@@ -209,32 +227,45 @@ export default function CalPage() {
               onRefresh={refresh}
               isSyncing={isSyncing}
               isConnected={isConnected}
+              isScheduling={mode === "schedule"}
             />
             <div className="relative min-h-0 flex-1">
-              {isLoading && (
+              {(isLoading ||
+                (mode === "schedule" && availability.isLoading)) && (
                 <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-background/60 text-sm text-muted-foreground backdrop-blur-sm">
                   <Spinner />
-                  Loading events…
+                  Loading…
                 </div>
               )}
-              <EventCalendar
-                events={events}
-                onEventAdd={handleEventAdd}
-                onEventUpdate={handleEventUpdate}
-                onEventDelete={handleEventDelete}
-                view={view}
-                currentDate={currentDate}
-                onDateChange={setCurrentDate}
-                isEventDialogOpen={isEventDialogOpen}
-                onEventDialogOpenChange={setIsEventDialogOpen}
-                onEventOpen={recordRecentEvent}
-                externalSelectedEvent={externalSelectedEvent}
-                onExternalSelectedEventHandled={() =>
-                  setExternalSelectedEvent(null)
-                }
-                canCreateRecurringEvents={isConnected}
-                disableDndProvider
-              />
+              {mode === "schedule" ? (
+                <ScheduleView
+                  currentDate={currentDate}
+                  events={events}
+                  slots={availability.slots}
+                  isSaving={availability.isSaving}
+                  error={availability.error}
+                  onUpdateRange={availability.updateRange}
+                />
+              ) : (
+                <EventCalendar
+                  events={events}
+                  onEventAdd={handleEventAdd}
+                  onEventUpdate={handleEventUpdate}
+                  onEventDelete={handleEventDelete}
+                  view={view}
+                  currentDate={currentDate}
+                  onDateChange={setCurrentDate}
+                  isEventDialogOpen={isEventDialogOpen}
+                  onEventDialogOpenChange={setIsEventDialogOpen}
+                  onEventOpen={recordRecentEvent}
+                  externalSelectedEvent={externalSelectedEvent}
+                  onExternalSelectedEventHandled={() =>
+                    setExternalSelectedEvent(null)
+                  }
+                  canCreateRecurringEvents={isConnected}
+                  disableDndProvider
+                />
+              )}
             </div>
           </div>
         </main>
@@ -245,7 +276,6 @@ export default function CalPage() {
           onRemoveContextEvent={removeContextEvent}
           onClearContextEvents={clearContextEvents}
         />
-        <Toaster />
       </div>
     </CalendarDndProvider>
   )

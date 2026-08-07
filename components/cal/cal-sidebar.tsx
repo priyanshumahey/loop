@@ -2,6 +2,7 @@
 
 import { format, isSameDay } from "date-fns"
 import {
+  CalendarClockIcon,
   CalendarIcon,
   ChevronRightIcon,
   ClockIcon,
@@ -99,6 +100,8 @@ export function CalSidebar({
   recentEvents,
   onDateChange,
   onNewEvent,
+  mode,
+  onSchedule,
   onOpenEvent,
 }: {
   currentDate: Date
@@ -106,6 +109,8 @@ export function CalSidebar({
   recentEvents: CalendarEvent[]
   onDateChange: (date: Date) => void
   onNewEvent: () => void
+  mode: "calendar" | "schedule"
+  onSchedule: () => void
   onOpenEvent: (event: CalendarEvent) => void
 }) {
   const sortedToday = useMemo(
@@ -120,14 +125,28 @@ export function CalSidebar({
     <AppSidebar
       active="calendar"
       railAction={
-        <button
-          type="button"
-          onClick={onNewEvent}
-          title="New event"
-          className="mt-1 grid size-9 place-items-center rounded-lg border border-border/70 bg-background text-foreground shadow-sm transition-colors hover:bg-muted"
-        >
-          <PlusIcon className="size-4" />
-        </button>
+        <div className="mt-1 flex flex-col gap-1">
+          <button
+            type="button"
+            onClick={onNewEvent}
+            title="New event"
+            className="grid size-9 place-items-center rounded-lg border border-border/70 bg-background text-foreground shadow-sm transition-colors hover:bg-muted"
+          >
+            <PlusIcon className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onSchedule}
+            title={mode === "schedule" ? "Back to calendar" : "Schedule"}
+            className={cn(
+              "grid size-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+              mode === "schedule" &&
+                "bg-foreground text-background hover:bg-foreground/90 hover:text-background"
+            )}
+          >
+            <CalendarClockIcon className="size-4" />
+          </button>
+        </div>
       }
     >
       {/* New event */}
@@ -138,6 +157,20 @@ export function CalSidebar({
       >
         <PlusIcon className="size-4" />
         New event
+      </button>
+
+      <button
+        type="button"
+        onClick={onSchedule}
+        className={cn(
+          "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors",
+          mode === "schedule"
+            ? "bg-foreground text-background"
+            : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+        )}
+      >
+        <CalendarClockIcon className="size-4" />
+        {mode === "schedule" ? "Calendar" : "Schedule"}
       </button>
 
       <SidebarCalendar
