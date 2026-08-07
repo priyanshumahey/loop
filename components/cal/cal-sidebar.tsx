@@ -11,6 +11,7 @@ import {
 import { useMemo } from "react"
 
 import { AppSidebar } from "@/components/app-sidebar"
+import { CalendarShareDialog } from "@/components/cal/calendar-share-dialog"
 import type { CalendarEvent, EventColor } from "@/components/event-calendar/types"
 import { SidebarCalendar } from "@/components/cal/sidebar-calendar"
 import { usePersistentState } from "@/hooks/use-persistent-state"
@@ -146,6 +147,7 @@ export function CalSidebar({
           >
             <CalendarClockIcon className="size-4" />
           </button>
+          <CalendarShareDialog triggerVariant="rail" />
         </div>
       }
     >
@@ -172,6 +174,8 @@ export function CalSidebar({
         <CalendarClockIcon className="size-4" />
         {mode === "schedule" ? "Calendar" : "Schedule"}
       </button>
+
+      <CalendarShareDialog />
 
       <SidebarCalendar
         selected={currentDate}
