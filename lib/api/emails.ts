@@ -55,6 +55,19 @@ export async function getEmail(id: string): Promise<Email> {
   return result.data!
 }
 
+/** Fetch every message in a conversation thread, each parsed in full. */
+export async function getThread(threadId: string): Promise<Email[]> {
+  const response = await fetch(`${API_BASE}/${threadId}/thread`)
+
+  if (!response.ok) {
+    const error: ApiResponse<never> = await response.json()
+    throw new Error(error.error || 'Failed to load thread')
+  }
+
+  const result: ApiResponse<Email[]> = await response.json()
+  return result.data ?? []
+}
+
 /** Build a download URL for one of a message's attachments. */
 export function attachmentUrl(
   messageId: string,

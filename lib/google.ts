@@ -144,7 +144,7 @@ function mapGoogleEvent(
   }
 }
 
-export function googleEventToResource(
+function googleEventToResource(
   input: GoogleEventInput
 ): calendar_v3.Schema$Event {
   const base = {
@@ -376,6 +376,8 @@ export type GmailAttachment = {
   size: number
   /** True for images/parts referenced inline in the HTML body (Content-ID). */
   inline: boolean
+  /** The `Content-ID` (angle brackets stripped) used by `cid:` refs in HTML. */
+  contentId: string
 }
 
 /** A Gmail message normalized to loop's internal shape. */
@@ -397,6 +399,10 @@ export type GmailMessage = {
   attachments: GmailAttachment[]
   labels: string[]
   unread: boolean
+  /** True when the message (or thread) carries a real (non-inline) attachment. */
+  hasAttachments: boolean
+  /** Number of messages in the thread. 1 for a single message; set by list. */
+  messageCount: number
 }
 
 function getHeader(
@@ -460,7 +466,7 @@ function parseGmailPayload(payload: gmail_v1.Schema$MessagePart | undefined): {
 
     if (filename && attachmentId) {
       const disposition = getHeader(part.headers, 'Content-Disposition')
-      const contentId = getHeader(part.headers, 'Content-ID')
+      const contentId = getHeader(part.headers, 'Content-ID').replace(/^<|>$/g, '')
       attachments.push({
         attachmentId,
         filename,
@@ -468,6 +474,7 @@ function parseGmailPayload(payload: gmail_v1.Schema$MessagePart | undefined): {
         size: part.body?.size ?? 0,
         inline:
           Boolean(contentId) || disposition.toLowerCase().startsWith('inline'),
+        contentId,
       })
     } else if (part.body?.data) {
       if (part.mimeType === 'text/plain' && !text) {
@@ -489,6 +496,13 @@ function mapGmailMessage(msg: gmail_v1.Schema$Message): GmailMessage {
   const labels = msg.labelIds ?? []
   const { text, html, attachments } = parseGmailPayload(msg.payload ?? undefined)
 
+  // In `metadata` list results the MIME parts aren't returned, so fall back to
+  // the top-level Content-Type: `multipart/mixed` reliably signals a real
+  // (non-inline) attachment, whereas `multipart/related`/`alternative` do not.
+  const hasAttachments =
+    attachments.some((a) => !a.inline) ||
+    /multipart\/mixed/i.test(getHeader(headers, 'Content-Type'))
+
   return {
     id: msg.id ?? '',
     threadId: msg.threadId ?? '',
@@ -503,12 +517,55 @@ function mapGmailMessage(msg: gmail_v1.Schema$Message): GmailMessage {
     attachments,
     labels,
     unread: labels.includes('UNREAD'),
+    hasAttachments,
+    messageCount: 1,
   }
 }
 
 /**
- * List the most recent messages in the user's inbox. Returns lightweight
- * summaries (headers + snippet, no body) so the list view stays cheap.
+ * Collapse a Gmail thread into a single list row: the newest message's headers
+ * and snippet, the thread subject (from the first message), a union of labels,
+ * unread if any message is unread, and the message count.
+ */
+function summarizeThread(thread: gmail_v1.Schema$Thread): GmailMessage {
+  const msgs = (thread.messages ?? []).map(mapGmailMessage)
+  const newest = msgs[msgs.length - 1]
+  if (!newest) {
+    return {
+      id: '',
+      threadId: thread.id ?? '',
+      from: '',
+      to: '',
+      cc: '',
+      subject: '',
+      date: '',
+      snippet: '',
+      bodyText: '',
+      bodyHtml: '',
+      attachments: [],
+      labels: [],
+      unread: false,
+      hasAttachments: false,
+      messageCount: 0,
+    }
+  }
+
+  return {
+    ...newest,
+    threadId: thread.id ?? newest.threadId,
+    // Prefer the original (first) message's subject so replies don't show "Re:".
+    subject: msgs[0].subject || newest.subject,
+    labels: Array.from(new Set(msgs.flatMap((m) => m.labels))),
+    unread: msgs.some((m) => m.unread),
+    hasAttachments: msgs.some((m) => m.hasAttachments),
+    messageCount: msgs.length,
+  }
+}
+
+/**
+ * List the most recent conversations in the user's inbox, one row per thread.
+ * Returns lightweight summaries (headers + snippet, no body) so the list view
+ * stays cheap.
  */
 export async function listGmailMessages(
   tokens: CalendarTokens,
@@ -522,7 +579,7 @@ export async function listGmailMessages(
   const { client, captured } = makeClient(tokens)
   const gmail = google.gmail({ version: 'v1', auth: client })
 
-  const listRes = await gmail.users.messages.list({
+  const listRes = await gmail.users.threads.list({
     userId: 'me',
     // Scope to the inbox by default (the mail view's folder tabs); when the user
     // is searching, drop the label filter so archived/sent/all-mail matches are
@@ -533,20 +590,21 @@ export async function listGmailMessages(
     pageToken: opts.pageToken || undefined,
   })
 
-  const ids = (listRes.data.messages ?? [])
-    .map((m) => m.id)
+  const ids = (listRes.data.threads ?? [])
+    .map((t) => t.id)
     .filter((id): id is string => Boolean(id))
 
-  // Fetch metadata (headers + snippet) for each message in parallel.
+  // Fetch metadata (headers + snippet) for each thread in parallel and collapse
+  // it into a single summary row.
   const messages = await Promise.all(
     ids.map(async (id) => {
-      const res = await gmail.users.messages.get({
+      const res = await gmail.users.threads.get({
         userId: 'me',
         id,
         format: 'metadata',
-        metadataHeaders: ['From', 'To', 'Cc', 'Subject', 'Date'],
+        metadataHeaders: ['From', 'To', 'Cc', 'Subject', 'Date', 'Content-Type'],
       })
-      return mapGmailMessage(res.data)
+      return summarizeThread(res.data)
     })
   )
 

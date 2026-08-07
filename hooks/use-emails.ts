@@ -35,6 +35,35 @@ interface UseEmailsReturn {
   refresh: () => Promise<void>
   /** Append the next page of older messages. */
   loadMore: () => Promise<void>
+  /**
+   * Optimistically mark a thread read locally (clears the unread dot). This is
+   * client-only and sticky for the session — it never writes back to Gmail.
+   */
+  markThreadRead: (threadId: string) => void
+}
+
+/**
+ * Mutating a ref-reachable value inside a hook callback trips the react-compiler
+ * lint rules, so the mutation lives in this module-level helper instead.
+ */
+function addToSet(set: Set<string>, value: string): void {
+  set.add(value)
+}
+
+function asRead(email: Email): Email {
+  return {
+    ...email,
+    unread: false,
+    labels: email.labels.filter((label) => label !== 'UNREAD'),
+  }
+}
+
+/** Apply the locally-read set to a fresh list so reads survive a refetch. */
+function applyLocalReads(list: Email[], readThreads: Set<string>): Email[] {
+  if (readThreads.size === 0) return list
+  return list.map((email) =>
+    readThreads.has(email.threadId) && email.unread ? asRead(email) : email
+  )
 }
 
 /**
@@ -59,6 +88,9 @@ export function useEmails({
 
   const hasLoaded = useRef(false)
   const inFlight = useRef(false)
+  // Threads the user has opened this session. Kept client-side so read state
+  // survives background refreshes without ever writing back to Gmail.
+  const readThreads = useRef<Set<string>>(new Set())
 
   const load = useCallback(
     async (background: boolean) => {
@@ -71,7 +103,7 @@ export function useEmails({
       try {
         const { emails: fresh, connected, nextPageToken: token } =
           await emailsApi.listEmails({ maxResults, query, allMail })
-        setEmails(fresh)
+        setEmails(applyLocalReads(fresh, readThreads.current))
         setIsConnected(connected)
         setNextPageToken(token)
       } catch (err) {
@@ -118,7 +150,8 @@ export function useEmails({
       })
       setEmails((prev) => {
         const seen = new Set(prev.map((e) => e.id))
-        return [...prev, ...older.filter((e) => !seen.has(e.id))]
+        const merged = [...prev, ...older.filter((e) => !seen.has(e.id))]
+        return applyLocalReads(merged, readThreads.current)
       })
       setNextPageToken(token)
     } catch (err) {
@@ -127,6 +160,16 @@ export function useEmails({
       setIsLoadingMore(false)
     }
   }, [nextPageToken, isLoadingMore, maxResults, query, allMail])
+
+  const markThreadRead = useCallback((threadId: string) => {
+    if (!threadId) return
+    addToSet(readThreads.current, threadId)
+    setEmails((prev) =>
+      prev.map((email) =>
+        email.threadId === threadId && email.unread ? asRead(email) : email
+      )
+    )
+  }, [])
 
   return {
     emails,
@@ -138,5 +181,6 @@ export function useEmails({
     error,
     refresh,
     loadMore,
+    markThreadRead,
   }
 }
