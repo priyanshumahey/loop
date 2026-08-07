@@ -684,7 +684,7 @@ export function CalAgent({
           >
             {messages.map((message, mi) => (
               <MessageView
-                key={message.id}
+                key={message.id || `msg-${mi}`}
                 message={message}
                 streaming={isStreaming && mi === messages.length - 1}
                 isLast={mi === messages.length - 1}
