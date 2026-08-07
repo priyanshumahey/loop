@@ -29,6 +29,7 @@ import {
   listInboxEmails,
   pullGoogleEvents,
 } from "@/lib/google-sync"
+import { dateInTimeZone, zonedToUtc } from "@/lib/recurrence"
 import { createClient } from "@/lib/supabase/server"
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -177,56 +178,6 @@ async function syncGoogleRange(
 
 const round1 = (n: number) => Math.round(n * 10) / 10
 
-/** Wall-clock date/time components of an instant, as seen in a timezone. */
-function zonedParts(date: Date, timeZone: string) {
-  const p = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).formatToParts(date)
-  const g = (t: string) => Number(p.find((x) => x.type === t)?.value)
-  return {
-    year: g("year"),
-    month: g("month"),
-    day: g("day"),
-    hour: g("hour") % 24,
-    minute: g("minute"),
-    second: g("second"),
-  }
-}
-
-/**
- * The UTC instant corresponding to a wall-clock time in a given timezone, e.g.
- * "midnight on 2026-07-13 in America/Los_Angeles" → the correct UTC Date. Used
- * so day/week/month boundaries reflect the user's calendar day, not the server's.
- */
-function zonedToUtc(
-  year: number,
-  month: number,
-  day: number,
-  hour: number,
-  minute: number,
-  timeZone: string
-): Date {
-  const guess = Date.UTC(year, month - 1, day, hour, minute)
-  const parts = zonedParts(new Date(guess), timeZone)
-  const asUtc = Date.UTC(
-    parts.year,
-    parts.month - 1,
-    parts.day,
-    parts.hour,
-    parts.minute,
-    parts.second
-  )
-  const offset = asUtc - guess // how far the tz wall-clock leads our UTC guess
-  return new Date(guess - offset)
-}
-
 /** Local midnight (start of a calendar day) as a UTC instant, tz-aware. */
 function localMidnight(
   year: number,
@@ -234,7 +185,11 @@ function localMidnight(
   day: number,
   timeZone?: string
 ): Date {
-  if (timeZone) return zonedToUtc(year, month, day, 0, 0, timeZone)
+  if (timeZone)
+    return zonedToUtc(
+      { year, month, day, hour: 0, minute: 0, second: 0 },
+      timeZone
+    )
   return new Date(year, month - 1, day, 0, 0, 0, 0)
 }
 
@@ -250,8 +205,8 @@ function anchorYMD(
   }
   const base = anchor ? new Date(anchor) : new Date()
   if (timeZone) {
-    const p = zonedParts(base, timeZone)
-    return { year: p.year, month: p.month, day: p.day }
+    const [year, month, day] = dateInTimeZone(base, timeZone).split("-").map(Number)
+    return { year, month, day }
   }
   return {
     year: base.getFullYear(),
