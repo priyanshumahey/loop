@@ -1,14 +1,10 @@
+import type { ApiResponse } from '@/lib/api/types'
 import type { GmailMessage } from '@/lib/google'
 
 /** Client-facing email shape (identical to the server's GmailMessage). */
 export type Email = GmailMessage
 
 const API_BASE = '/api/emails'
-
-interface ApiResponse<T> {
-  data?: T
-  error?: string
-}
 
 /**
  * List the user's most recent inbox messages. `connected` is false when the
