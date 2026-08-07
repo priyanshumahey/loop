@@ -11,7 +11,6 @@ import {
 import { format, isSameDay } from "date-fns";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { toast } from "sonner";
 
 import { EventDescription } from "@/components/event-calendar/event-description";
 import { EventDialog } from "@/components/event-calendar/event-dialog";
@@ -61,6 +60,7 @@ export function EventDetail({ event: initialEvent }: EventDetailProps) {
   const router = useRouter();
   const [event, setEvent] = useState<CalendarEvent>(initialEvent);
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const when = formatEventWhen(event);
 
@@ -69,6 +69,7 @@ export function EventDetail({ event: initialEvent }: EventDetailProps) {
     recurrenceScope: RecurrenceScope,
   ) => {
     setIsEditOpen(false);
+    setActionError(null);
     const previous = event;
     setEvent(updated);
     try {
@@ -78,13 +79,9 @@ export function EventDetail({ event: initialEvent }: EventDetailProps) {
         recurrenceScope,
       );
       setEvent(saved);
-      toast(`Event "${saved.title}" updated`, {
-        description: format(new Date(saved.start), "MMM d, yyyy"),
-        position: "bottom-left",
-      });
     } catch (err) {
       setEvent(previous);
-      toast.error(err instanceof Error ? err.message : "Failed to update event");
+      setActionError(err instanceof Error ? err.message : "Failed to update event");
     }
   };
 
@@ -93,15 +90,12 @@ export function EventDetail({ event: initialEvent }: EventDetailProps) {
     recurrenceScope: RecurrenceScope = "single",
   ) => {
     setIsEditOpen(false);
+    setActionError(null);
     try {
       await eventsApi.deleteEvent(eventId, recurrenceScope);
-      toast(`Event "${event.title}" deleted`, {
-        description: format(new Date(event.start), "MMM d, yyyy"),
-        position: "bottom-left",
-      });
       router.push("/cal");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to delete event");
+      setActionError(err instanceof Error ? err.message : "Failed to delete event");
     }
   };
 
@@ -136,6 +130,11 @@ export function EventDetail({ event: initialEvent }: EventDetailProps) {
       {/* Body */}
       <main className="min-h-0 flex-1 overflow-y-auto px-4 pb-16 sm:px-6">
         <div className="mx-auto w-full max-w-3xl">
+          {actionError && (
+            <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive sm:mt-8">
+              {actionError}
+            </div>
+          )}
           <div className="mt-4 overflow-hidden rounded-2xl border border-border/70 bg-background shadow-sm sm:mt-8">
             {/* Color accent */}
             <div
