@@ -20,6 +20,32 @@ export function senderLabel(email: Email): string {
   return parseAddress(email.from).name
 }
 
+/**
+ * Split a recipient header (`To`/`Cc`, possibly many addresses) into individual
+ * name/email pairs. Respects quoted display names and angle-bracketed addresses
+ * so commas inside them don't split.
+ */
+export function parseAddressList(header: string): { name: string; email: string }[] {
+  if (!header.trim()) return []
+  const parts: string[] = []
+  let current = ''
+  let inQuote = false
+  let depth = 0
+  for (const ch of header) {
+    if (ch === '"') inQuote = !inQuote
+    else if (ch === '<') depth++
+    else if (ch === '>') depth = Math.max(0, depth - 1)
+    if (ch === ',' && !inQuote && depth === 0) {
+      parts.push(current)
+      current = ''
+      continue
+    }
+    current += ch
+  }
+  if (current.trim()) parts.push(current)
+  return parts.map((p) => parseAddress(p)).filter((a) => a.email)
+}
+
 /** A short, human-friendly timestamp for an email's `Date` header. */
 export function formatEmailDate(date: string): string {
   const parsed = new Date(date)

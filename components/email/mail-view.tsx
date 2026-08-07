@@ -58,6 +58,8 @@ function agentEmailToSummary(a: AgentEmail): Email {
     attachments: [],
     labels,
     unread: a.unread,
+    hasAttachments: false,
+    messageCount: 1,
   }
 }
 
@@ -120,6 +122,7 @@ export function MailView() {
     error,
     refresh,
     loadMore,
+    markThreadRead,
   } = useEmails({ query: query || undefined, allMail })
 
   const unreadCount = useMemo(
@@ -127,7 +130,16 @@ export function MailView() {
     [emails]
   )
 
-  const openAgentEmail = (a: AgentEmail) => setSelected(agentEmailToSummary(a))
+  // Opening a thread marks it read locally (no Gmail write) and shows the reader.
+  const selectEmail = useCallback(
+    (email: Email) => {
+      setSelected(email)
+      if (email.unread) markThreadRead(email.threadId)
+    },
+    [markThreadRead]
+  )
+
+  const openAgentEmail = (a: AgentEmail) => selectEmail(agentEmailToSummary(a))
 
   const attachToCopilot = useCallback((email: Email) => {
     const ctx = toContextEmail(email)
@@ -221,7 +233,7 @@ export function MailView() {
                   <EmailList
                     emails={emails}
                     selectedId={selected?.id ?? null}
-                    onSelect={setSelected}
+                    onSelect={selectEmail}
                   />
                   {hasMore && (
                     <div className="p-3">

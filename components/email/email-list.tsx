@@ -1,6 +1,6 @@
 'use client'
 
-import { StarIcon } from 'lucide-react'
+import { PaperclipIcon, StarIcon } from 'lucide-react'
 import { Fragment, useMemo } from 'react'
 
 import type { Email } from '@/lib/api/emails'
@@ -64,6 +64,11 @@ function EmailRow({
           >
             {name}
           </span>
+          {email.messageCount > 1 && (
+            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70">
+              {email.messageCount}
+            </span>
+          )}
           {starred && (
             <StarIcon className="size-3 shrink-0 fill-amber-400 text-amber-400" />
           )}
@@ -95,6 +100,12 @@ function EmailRow({
           <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground/80">
             {email.snippet}
           </span>
+          {email.hasAttachments && (
+            <PaperclipIcon
+              className="size-3 shrink-0 text-muted-foreground/70"
+              aria-label="Has attachment"
+            />
+          )}
           {important && (
             <span
               className="size-1.5 shrink-0 rounded-full bg-amber-500"
