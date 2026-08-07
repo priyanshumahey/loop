@@ -1,15 +1,55 @@
 'use client'
 
-import { MailIcon, SparklesIcon } from 'lucide-react'
+import { CalendarDaysIcon, MailIcon, SparklesIcon } from 'lucide-react'
 import { useCallback, useState } from 'react'
 
 import { AgentTabs } from '@/components/cal/agent/agent-tabs'
 import { CalAgent, type ContextEmail } from '@/components/cal/cal-agent'
+import { MailCalendarPanel } from '@/components/email/mail-calendar-panel'
 import type { AgentEmail } from '@/lib/cal-agent/tools'
 import { useAgentConversations } from '@/hooks/use-agent-conversations'
 import { usePersistentState } from '@/hooks/use-persistent-state'
 import { useSidebarResize } from '@/hooks/use-sidebar-resize'
 import { cn } from '@/lib/utils'
+
+type PanelMode = 'assistant' | 'calendar'
+
+const PANEL_MODES: { value: PanelMode; label: string; icon: typeof MailIcon }[] = [
+  { value: 'assistant', label: 'Assistant', icon: SparklesIcon },
+  { value: 'calendar', label: 'Calendar', icon: CalendarDaysIcon },
+]
+
+/** Segmented control to swap the right rail between the assistant and calendar. */
+function ModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: PanelMode
+  onChange: (mode: PanelMode) => void
+}) {
+  return (
+    <div className="flex items-center gap-0.5 rounded-lg bg-muted/70 p-0.5">
+      {PANEL_MODES.map(({ value, label, icon: Icon }) => (
+        <button
+          key={value}
+          type="button"
+          onClick={() => onChange(value)}
+          aria-pressed={mode === value}
+          title={label}
+          className={cn(
+            'flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium transition-colors',
+            mode === value
+              ? 'bg-background text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <Icon className="size-3.5" />
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 const DEFAULT_WIDTH = '24rem'
 const MIN_WIDTH = '20rem'
@@ -72,6 +112,10 @@ export function MailCopilotPanel({
     'loop:copilot:collapsed',
     false
   )
+  const [mode, setMode] = usePersistentState<PanelMode>(
+    'loop:mail:right-panel-mode',
+    'assistant'
+  )
   const [isDragging, setIsDragging] = useState(false)
   const store = useAgentConversations()
 
@@ -80,6 +124,10 @@ export function MailCopilotPanel({
   // Keep the panel open while there's an email waiting to attach, so clicking
   // "Ask copilot" on the reader reveals the assistant automatically.
   const showCollapsed = collapsed && contextEmails.length === 0
+
+  // Attaching an email is an assistant action, so force the assistant view
+  // whenever there are emails pending attachment.
+  const effectiveMode: PanelMode = contextEmails.length > 0 ? 'assistant' : mode
 
   const { dragRef, handleMouseDown } = useSidebarResize({
     direction: 'left',
@@ -94,22 +142,24 @@ export function MailCopilotPanel({
   })
 
   if (showCollapsed) {
+    const RailIcon = mode === 'calendar' ? CalendarDaysIcon : SparklesIcon
+    const railLabel = mode === 'calendar' ? 'Calendar' : 'Ask agent'
     return (
       <div className="hidden h-svh shrink-0 py-2 pr-2 md:block">
         <button
           type="button"
           onClick={() => setCollapsed(false)}
-          title="Open assistant"
+          title={mode === 'calendar' ? 'Open calendar' : 'Open assistant'}
           className="flex h-full w-11 flex-col items-center justify-between rounded-2xl border border-border/70 bg-background py-3 shadow-sm transition-colors hover:bg-muted"
         >
-          <SparklesIcon className="size-4 text-foreground" />
+          <RailIcon className="size-4 text-foreground" />
           <span
             className="text-[12px] font-medium tracking-wide text-muted-foreground"
             style={{ writingMode: 'vertical-rl' }}
           >
-            Ask agent
+            {railLabel}
           </span>
-          <SparklesIcon className="size-4 text-transparent" aria-hidden />
+          <RailIcon className="size-4 text-transparent" aria-hidden />
         </button>
       </div>
     )
@@ -135,30 +185,38 @@ export function MailCopilotPanel({
       />
 
       <div className="relative flex h-full w-full flex-col overflow-hidden rounded-2xl border border-border/70 bg-background shadow-sm">
-        <CalAgent
-          key={store.activeId}
-          conversationId={store.activeId}
-          initialMessages={store.activeConversation?.messages}
-          onPersist={store.persist}
-          onClose={() => setCollapsed(true)}
-          onOpenEmail={onOpenEmail}
-          contextEmails={contextEmails}
-          onRemoveContextEmail={onRemoveContextEmail}
-          onClearContextEmails={onClearContextEmails}
-          renderEmptyState={(onAsk) => <MailBriefing onAsk={onAsk} />}
-          tabBar={
-            <AgentTabs
-              openConversations={store.openConversations}
-              conversations={store.conversations}
-              activeId={store.activeId}
-              isDraft={store.isDraft}
-              onNewChat={store.newChat}
-              onSelect={store.select}
-              onCloseTab={store.closeTab}
-              onDelete={store.remove}
-            />
-          }
-        />
+        {effectiveMode === 'calendar' ? (
+          <MailCalendarPanel
+            headerLeading={<ModeToggle mode={effectiveMode} onChange={setMode} />}
+            onClose={() => setCollapsed(true)}
+          />
+        ) : (
+          <CalAgent
+            key={store.activeId}
+            conversationId={store.activeId}
+            initialMessages={store.activeConversation?.messages}
+            onPersist={store.persist}
+            onClose={() => setCollapsed(true)}
+            onOpenEmail={onOpenEmail}
+            contextEmails={contextEmails}
+            onRemoveContextEmail={onRemoveContextEmail}
+            onClearContextEmails={onClearContextEmails}
+            renderEmptyState={(onAsk) => <MailBriefing onAsk={onAsk} />}
+            headerLeading={<ModeToggle mode={effectiveMode} onChange={setMode} />}
+            tabBar={
+              <AgentTabs
+                openConversations={store.openConversations}
+                conversations={store.conversations}
+                activeId={store.activeId}
+                isDraft={store.isDraft}
+                onNewChat={store.newChat}
+                onSelect={store.select}
+                onCloseTab={store.closeTab}
+                onDelete={store.remove}
+              />
+            }
+          />
+        )}
       </div>
     </div>
   )

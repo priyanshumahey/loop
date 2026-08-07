@@ -238,6 +238,7 @@ export function CalAgent({
   onClearContextEmails,
   tabBar,
   renderEmptyState,
+  headerLeading,
 }: {
   /** Stable id for this conversation; enables resuming an in-flight stream. */
   conversationId?: string
@@ -271,6 +272,8 @@ export function CalAgent({
   tabBar?: React.ReactNode
   /** Custom empty state; receives a helper to send a prompt. */
   renderEmptyState?: (onAsk: (text: string) => void) => React.ReactNode
+  /** Optional content rendered in the header in place of the title (e.g. a mode toggle). */
+  headerLeading?: React.ReactNode
 }) {
   const router = useRouter()
 
@@ -599,9 +602,11 @@ export function CalAgent({
               <PanelRightCloseIcon className="size-4" />
             </button>
           )}
-          <h1 className="min-w-0 truncate text-[13px] font-medium text-foreground">
-            Loop assistant
-          </h1>
+          {headerLeading ?? (
+            <h1 className="min-w-0 truncate text-[13px] font-medium text-foreground">
+              Loop assistant
+            </h1>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <button
