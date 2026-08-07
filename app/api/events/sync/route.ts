@@ -51,7 +51,12 @@ export async function POST(request: NextRequest) {
     )
   } catch (err) {
     // Google may be down/unauthorized – still return the local events.
-    console.error('Google pull failed:', err)
+    const googleError = err as { code?: unknown; message?: unknown; status?: unknown }
+    console.error('Google pull failed', {
+      code: googleError.code,
+      status: googleError.status,
+      message: googleError.message,
+    })
   }
 
   const result = await getEvents({ startDate, endDate })
