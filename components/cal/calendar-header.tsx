@@ -4,7 +4,9 @@ import {
   addDays,
   addMonths,
   addWeeks,
+  endOfWeek,
   format,
+  startOfWeek,
   subMonths,
   subWeeks,
 } from "date-fns"
@@ -27,6 +29,7 @@ interface CalendarHeaderProps {
   isSyncing?: boolean
   /** Whether Google Calendar is connected for the current user. */
   isConnected?: boolean
+  isScheduling?: boolean
 }
 
 const VIEWS: { value: CalendarView; label: string }[] = [
@@ -45,9 +48,12 @@ export function CalendarHeader({
   onRefresh,
   isSyncing,
   isConnected,
+  isScheduling = false,
 }: CalendarHeaderProps) {
   const handlePrevious = () => {
-    if (view === "month") {
+    if (isScheduling) {
+      onDateChange(subWeeks(currentDate, 1))
+    } else if (view === "month") {
       onDateChange(subMonths(currentDate, 1))
     } else if (view === "week") {
       onDateChange(subWeeks(currentDate, 1))
@@ -59,7 +65,9 @@ export function CalendarHeader({
   }
 
   const handleNext = () => {
-    if (view === "month") {
+    if (isScheduling) {
+      onDateChange(addWeeks(currentDate, 1))
+    } else if (view === "month") {
       onDateChange(addMonths(currentDate, 1))
     } else if (view === "week") {
       onDateChange(addWeeks(currentDate, 1))
@@ -71,6 +79,11 @@ export function CalendarHeader({
   }
 
   const getViewTitle = () => {
+    if (isScheduling) {
+      const start = startOfWeek(currentDate)
+      const end = endOfWeek(currentDate)
+      return `${format(start, "MMM d")} – ${format(end, "MMM d, yyyy")}`
+    }
     if (view === "day") {
       return format(currentDate, "MMMM d, yyyy")
     }
@@ -117,7 +130,12 @@ export function CalendarHeader({
 
         {/* Right: view switcher + new event */}
         <div className="flex shrink-0 items-center gap-2">
-          <div className="hidden items-center rounded-lg border border-border bg-background p-0.5 sm:flex">
+          <div
+            className={cn(
+              "hidden items-center rounded-lg border border-border bg-background p-0.5 sm:flex",
+              isScheduling && "sm:hidden"
+            )}
+          >
             {VIEWS.map((v) => (
               <button
                 key={v.value}
@@ -162,10 +180,12 @@ export function CalendarHeader({
             )
           )}
 
-          <Button size="sm" onClick={onNewEvent} className="gap-1.5">
-            <PlusIcon aria-hidden="true" className="size-4" />
-            <span className="hidden sm:inline">New event</span>
-          </Button>
+          {!isScheduling && (
+            <Button size="sm" onClick={onNewEvent} className="gap-1.5">
+              <PlusIcon aria-hidden="true" className="size-4" />
+              <span className="hidden sm:inline">New event</span>
+            </Button>
+          )}
         </div>
       </div>
     </header>
