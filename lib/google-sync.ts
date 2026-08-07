@@ -36,7 +36,42 @@ const LOCAL_WRITE_GRACE_MS = 30_000
 
 type Db = SupabaseClient
 
-export function shouldProtectLocalGoogleWrite(
+function googleErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined
+
+  const value = error as {
+    message?: unknown
+    response?: { data?: { error?: unknown } }
+    cause?: unknown
+  }
+  const responseCode = value.response?.data?.error
+  if (typeof responseCode === 'string') return responseCode
+  if (value.message === 'invalid_grant') return value.message
+  return googleErrorCode(value.cause)
+}
+
+function isGoogleAuthorizationError(error: unknown): boolean {
+  return googleErrorCode(error) === 'invalid_grant'
+}
+
+async function disconnectRevokedGoogleCredentials(
+  db: Db,
+  userId: string,
+  error: unknown
+): Promise<boolean> {
+  if (!isGoogleAuthorizationError(error)) return false
+
+  const { error: deleteError } = await db
+    .from('oauth_tokens')
+    .delete()
+    .eq('user_id', userId)
+    .eq('provider', 'google')
+
+  if (deleteError) throw deleteError
+  return true
+}
+
+function shouldProtectLocalGoogleWrite(
   localUpdatedAt: string | null,
   googleUpdatedAt: string | null,
   now = Date.now()
@@ -51,7 +86,7 @@ export function shouldProtectLocalGoogleWrite(
   )
 }
 
-export function replacementSeriesId(
+function replacementSeriesId(
   recurringEventId: string,
   boundaryOriginalStart: string
 ): string {
@@ -195,11 +230,22 @@ export async function pullGoogleEvents(
   if (!tokens) return { synced: false, imported: 0, updated: 0, removed: 0 }
   const googleTokens = tokens
 
-  const { events: remote, refreshed } = await listCalendarEvents(googleTokens, {
-    timeMin,
-    timeMax,
-    calendarId: DEFAULT_CALENDAR_ID,
-  })
+  let remote: Awaited<ReturnType<typeof listCalendarEvents>>['events']
+  let refreshed: RefreshedTokens | undefined
+  try {
+    const result = await listCalendarEvents(googleTokens, {
+      timeMin,
+      timeMax,
+      calendarId: DEFAULT_CALENDAR_ID,
+    })
+    remote = result.events
+    refreshed = result.refreshed
+  } catch (error) {
+    if (await disconnectRevokedGoogleCredentials(db, userId, error)) {
+      return { synced: false, imported: 0, updated: 0, removed: 0 }
+    }
+    throw error
+  }
   await saveRefreshed(db, userId, refreshed)
 
   // Existing rows linked to Google (either pulled from Google or created in
