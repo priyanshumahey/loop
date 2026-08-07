@@ -23,13 +23,10 @@ import {
   recurrenceToGoogleRule,
   shiftByWallTimeChange,
 } from '@/lib/recurrence'
+import type { ServiceResult } from '@/lib/db/service'
 import { createClient } from '@/lib/supabase/server'
 
 const EVENTS_TABLE = 'events'
-
-export type ServiceResult<T> =
-  | { success: true; data: T }
-  | { success: false; error: string }
 
 function rowToGoogleInput(row: DbEvent): GoogleEventInput {
   const timezone = row.timezone ?? 'UTC'
