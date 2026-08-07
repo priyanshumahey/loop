@@ -22,7 +22,6 @@ import type {
   CalendarView,
   RecurrenceScope,
 } from "@/components/event-calendar/types"
-import { Toaster } from "@/components/ui/sonner"
 import { Spinner } from "@/components/ui/loading-screen"
 import type { AgentEvent } from "@/lib/cal-agent/tools"
 import { useEvents } from "@/hooks/use-events"
@@ -245,7 +244,6 @@ export default function CalPage() {
           onRemoveContextEvent={removeContextEvent}
           onClearContextEvents={clearContextEvents}
         />
-        <Toaster />
       </div>
     </CalendarDndProvider>
   )

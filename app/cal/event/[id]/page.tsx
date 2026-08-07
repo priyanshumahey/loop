@@ -1,7 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 
 import { EventDetail } from "@/components/cal/event-detail";
-import { Toaster } from "@/components/ui/sonner";
 import { getEventById } from "@/lib/db/events";
 
 interface EventPageProps {
@@ -17,10 +16,5 @@ export default async function EventPage({ params }: EventPageProps) {
     notFound();
   }
 
-  return (
-    <>
-      <EventDetail event={result.data} />
-      <Toaster />
-    </>
-  );
+  return <EventDetail event={result.data} />;
 }
