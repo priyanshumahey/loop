@@ -1,21 +1,28 @@
-# Next.js template
+# Loop
 
-This is a Next.js template with shadcn/ui.
+Loop is a personal workspace for managing a Google calendar and inbox with an
+AI assistant. It combines calendar planning, Gmail threads and attachments,
+public booking links, and read-only calendar sharing.
 
-## Adding components
+## Local development
 
-To add components to your app, run the following command:
+Prerequisites: Bun, Docker, and the Supabase CLI.
 
 ```bash
-npx shadcn@latest add button
+bun install
+cp .env.example .env.local
+bun run dev:up
+bun run dev
 ```
 
-This will place the ui components in the `components` directory.
+Open [http://localhost:3000](http://localhost:3000). Configure Google OAuth,
+OpenAI, Redis, and encryption values in `.env.local` as described in
+`.env.example`.
 
-## Using components
+## Checks
 
-To use the components in your app, import them as follows:
-
-```tsx
-import { Button } from "@/components/ui/button";
+```bash
+bun run typecheck
+bun run lint
+bun run build
 ```
