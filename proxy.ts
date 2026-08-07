@@ -1,8 +1,17 @@
-import { type NextRequest } from 'next/server'
+import { NextResponse, type NextRequest } from 'next/server'
 
 import { updateSession } from '@/lib/supabase/middleware'
 
 export async function proxy(request: NextRequest) {
+  const pathname = request.nextUrl.pathname
+  if (
+    pathname.startsWith('/schedule/') ||
+    pathname.startsWith('/api/schedule/') ||
+    pathname.startsWith('/shared/calendar/') ||
+    pathname.startsWith('/api/calendar-shares/public/')
+  ) {
+    return NextResponse.next()
+  }
   return await updateSession(request)
 }
 
