@@ -59,15 +59,6 @@ export function ChatInput({
         />
         <div className="flex items-center justify-between px-1 pt-0.5">
           <div className="flex items-center gap-1.5">
-            {/* TODO: attachments — add back later
-            <button
-              type="button"
-              aria-label="Attach"
-              className="grid size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <PaperclipIcon className="size-[18px]" />
-            </button>
-            */}
             <span className="rounded-full border border-border/70 px-2.5 py-1 text-xs font-medium text-muted-foreground">
               Loop
             </span>
