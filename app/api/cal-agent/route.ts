@@ -216,7 +216,11 @@ export async function POST(req: Request) {
       "But when the user explicitly asks for a breakdown, details, or an in-depth answer, give a complete, well-organized response — use short paragraphs or tight bullet points, not long run-on sentences. Match the depth to what they asked for.",
       "Offer a helpful next step if relevant.",
     ].join(" "),
-    messages: await convertToModelMessages(withEventContext(messages)),
+    messages: await convertToModelMessages(withEventContext(messages), {
+      // A stopped or interrupted stream can leave a persisted tool call without
+      // a result. Keep the usable history instead of rejecting the next turn.
+      ignoreIncompleteToolCalls: true,
+    }),
     tools: buildCalendarTools(timezone),
     // When the user has enabled auto-approve, skip the confirmation gate so
     // mutating tools execute directly within the same turn.
