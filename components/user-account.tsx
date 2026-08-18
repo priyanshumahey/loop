@@ -1,7 +1,8 @@
 "use client"
 
-import { LogOutIcon } from "lucide-react"
+import { LogOutIcon, UsersIcon } from "lucide-react"
 import Image from "next/image"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
@@ -115,6 +116,17 @@ export function UserAccount({ collapsed = false }: { collapsed?: boolean }) {
         sideOffset={8}
         className="w-56 p-1"
       >
+        <p className="px-2.5 pt-1 pb-1 text-[11px] font-medium text-muted-foreground">
+          Workspaces
+        </p>
+        <Link
+          href="/teams"
+          className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-muted"
+        >
+          <UsersIcon className="size-4" />
+          Northwind Studio
+        </Link>
+        <div className="my-1 h-px bg-border/60" />
         <button
           type="button"
           onClick={signOut}

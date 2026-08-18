@@ -5,10 +5,8 @@ import type { ReactNode } from "react"
 
 import { LoopMark } from "@/components/loop-logo"
 import { UserAccount } from "@/components/user-account"
-import { ViewSwitcher } from "@/components/view-switcher"
+import { ViewSwitcher, type SurfaceKey } from "@/components/view-switcher"
 import { usePersistentState } from "@/hooks/use-persistent-state"
-
-type SurfaceKey = "chat" | "calendar" | "mail"
 
 /**
  * A single shared collapse key (rather than one per surface) so the sidebar's
@@ -27,12 +25,15 @@ export function AppSidebar({
   active,
   children,
   railAction,
+  renderAccount,
 }: {
   active: SurfaceKey
   /** Surface-specific body rendered between the switcher and the account footer. */
   children: ReactNode
   /** Optional primary action shown on the collapsed rail (e.g. New event). */
   railAction?: ReactNode
+  /** Replaces the account footer. Receives the sidebar's collapsed state. */
+  renderAccount?: (collapsed: boolean) => ReactNode
 }) {
   const [collapsed, setCollapsed] = usePersistentState(COLLAPSE_KEY, false)
 
@@ -56,7 +57,7 @@ export function AppSidebar({
         {railAction}
 
         <div className="mt-auto border-t border-border/60 pt-2">
-          <UserAccount collapsed />
+          {renderAccount?.(true) ?? <UserAccount collapsed />}
         </div>
       </div>
     )
@@ -90,7 +91,7 @@ export function AppSidebar({
 
       {/* Account */}
       <div className="mt-1 border-t border-border/60 pt-1">
-        <UserAccount />
+        {renderAccount?.(false) ?? <UserAccount />}
       </div>
     </aside>
   )

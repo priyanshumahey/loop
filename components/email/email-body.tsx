@@ -1,35 +1,20 @@
 'use client'
 
-import DOMPurify from 'isomorphic-dompurify'
-import { DownloadIcon, FileIcon, ImageIcon, ImageOffIcon, PaperclipIcon } from 'lucide-react'
-import { Fragment, useMemo, useState } from 'react'
+import { DownloadIcon, FileIcon, ImageIcon, PaperclipIcon } from 'lucide-react'
+import { Fragment, useCallback } from 'react'
 
 import { attachmentUrl, inlineImageUrl, type Email } from '@/lib/api/emails'
 import { cn } from '@/lib/utils'
 
+import { APP_ORIGIN, RenderedEmailHtml } from './html-frame'
 import { formatBytes } from './utils'
-
-// The app origin, needed to make image URLs absolute so they resolve inside the
-// iframe's `srcdoc` document. Bodies only render client-side (fetched after
-// mount), so reading `window` here is safe and never runs during SSR.
-const ORIGIN = typeof window !== 'undefined' ? window.location.origin : ''
-
-// Force links in message bodies to open in a new tab without handing the opener
-// window to the target page (reverse tabnabbing). Module bodies run once, so
-// this registers a single hook on the shared DOMPurify instance.
-DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-  if ((node as Element).tagName === 'A') {
-    node.setAttribute('target', '_blank')
-    node.setAttribute('rel', 'noopener noreferrer')
-  }
-})
 
 /** Rewrite `cid:` image refs to absolute inline-attachment URLs for this message. */
 function rewriteCidImages(html: string, email: Email): string {
   const byCid = new Map<string, string>()
   for (const att of email.attachments ?? []) {
     if (att.contentId) {
-      byCid.set(att.contentId, `${ORIGIN}${inlineImageUrl(email.id, att)}`)
+      byCid.set(att.contentId, `${APP_ORIGIN}${inlineImageUrl(email.id, att)}`)
     }
   }
   if (byCid.size === 0) return html
@@ -40,91 +25,17 @@ function rewriteCidImages(html: string, email: Email): string {
 }
 
 /**
- * Strip `src`/`srcset` from remote (external) images so tracking pixels don't
- * load until the user opts in. Our own inline-image URLs (same origin) are kept.
+ * The HTML part of a message. Embedded `cid:` images resolve to this message's
+ * inline attachment URLs before anything is sanitized or rendered.
  */
-function stripRemoteImages(html: string): { html: string; blocked: number } {
-  let blocked = 0
-  const out = html.replace(/<img\b[^>]*>/gi, (tag) => {
-    const src = /\ssrc=("|')(.*?)\1/i.exec(tag)?.[2] ?? ''
-    const isRemote = /^https?:\/\//i.test(src) && !(ORIGIN && src.startsWith(ORIGIN))
-    if (!isRemote) return tag
-    blocked++
-    return tag.replace(/\ssrc=("|').*?\1/i, '').replace(/\ssrcset=("|').*?\1/i, '')
-  })
-  return { html: out, blocked }
-}
-
-/** Wrap an email's HTML in a styled, self-contained document for the iframe. */
-function buildSrcDoc(html: string): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><base target="_blank"><style>
-    html, body { margin: 0; padding: 0; }
-    body {
-      padding: 2px;
-      font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      color: #1a1a1a;
-      background: #ffffff;
-      word-break: break-word;
-      overflow-wrap: anywhere;
-    }
-    img { max-width: 100% !important; height: auto; }
-    a { color: #2563eb; }
-    table { max-width: 100% !important; }
-    pre { white-space: pre-wrap; }
-    * { box-sizing: border-box; max-width: 100%; }
-  </style></head><body>${html}</body></html>`
-}
-
-/**
- * Renders remote HTML email in a sandboxed iframe that auto-sizes to its
- * content. The HTML is sanitized with DOMPurify first, embedded `cid:` images
- * are resolved to inline attachment URLs, and remote images are blocked until
- * the user reveals them. The sandbox intentionally omits `allow-scripts`, so no
- * JavaScript in the message can run; `allow-same-origin` only lets us measure
- * the height, and `allow-popups` lets the user click through links.
- */
-function EmailHtmlFrame({ email }: { email: Email }) {
-  const [height, setHeight] = useState(480)
-  const [showRemote, setShowRemote] = useState(false)
-
-  const { html, blocked } = useMemo(() => {
-    const withCid = rewriteCidImages(email.bodyHtml, email)
-    const safe = DOMPurify.sanitize(withCid, { ADD_ATTR: ['target'] })
-    return showRemote ? { html: safe, blocked: 0 } : stripRemoteImages(safe)
-  }, [email, showRemote])
-
-  return (
-    <div className="flex flex-col gap-2">
-      {blocked > 0 && (
-        <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/50 px-3 py-1.5 text-[12px] text-muted-foreground">
-          <ImageOffIcon className="size-3.5 shrink-0" />
-          <span className="min-w-0 flex-1">
-            Remote images are hidden to protect your privacy.
-          </span>
-          <button
-            type="button"
-            onClick={() => setShowRemote(true)}
-            className="shrink-0 font-medium text-foreground underline underline-offset-2 hover:text-primary"
-          >
-            Show images
-          </button>
-        </div>
-      )}
-      <iframe
-        title="Email content"
-        sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-        srcDoc={buildSrcDoc(html)}
-        onLoad={(e) => {
-          const doc = e.currentTarget.contentDocument
-          const h = doc?.documentElement?.scrollHeight ?? doc?.body?.scrollHeight
-          if (h && h > 0) setHeight(h + 8)
-        }}
-        style={{ height }}
-        className="w-full border-0 bg-white"
-      />
-    </div>
+function EmailHtmlBody({ email }: { email: Email }) {
+  const preprocess = useCallback(
+    (html: string) => rewriteCidImages(html, email),
+    [email]
   )
+  return <RenderedEmailHtml html={email.bodyHtml} preprocess={preprocess} />
 }
+
 
 /** Angle-bracketed bare URLs (`<https://…>`) render ugly; unwrap them. */
 function cleanPlainText(text: string): string {
@@ -236,7 +147,7 @@ export function EmailBody({
   return (
     <div className="flex flex-col gap-4">
       {email.bodyHtml ? (
-        <EmailHtmlFrame email={email} />
+        <EmailHtmlBody email={email} />
       ) : email.bodyText ? (
         <PlainTextBody text={email.bodyText} />
       ) : (

@@ -5,7 +5,13 @@ import Link from "next/link"
 
 import { cn } from "@/lib/utils"
 
-type ViewKey = "chat" | "calendar" | "mail"
+/**
+ * Every surface the sidebar can render. `teams` is reached from the account
+ * menu rather than this switcher, so it has no pill of its own.
+ */
+export type SurfaceKey = "chat" | "calendar" | "mail" | "teams"
+
+type ViewKey = Exclude<SurfaceKey, "teams">
 
 const VIEWS: { key: ViewKey; href: string; label: string; icon: typeof MailIcon }[] = [
   { key: "chat", href: "/home", label: "Chat", icon: SparklesIcon },
@@ -22,7 +28,7 @@ export function ViewSwitcher({
   active,
   collapsed = false,
 }: {
-  active: ViewKey
+  active: SurfaceKey
   collapsed?: boolean
 }) {
   if (collapsed) {
