@@ -9,12 +9,14 @@ import {
   MailOpenIcon,
   MessagesSquareIcon,
   PenLineIcon,
+  RotateCcwIcon,
   StarIcon,
 } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { ConnectGoogle } from "@/components/cal/agent/connect-google"
 import { avatarTint, formatFullDate, initials } from "@/components/email/utils"
+import { AgentCard, AgentNotice, LoadingState } from "@/components/agent"
 import * as emailsApi from "@/lib/api/emails"
 import type {
   AgentDraft,
@@ -166,14 +168,14 @@ function EmailCard({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-xl border transition-colors",
-        email.unread ? "border-border/70 bg-background" : "border-border/60 bg-muted/20"
+        "overflow-hidden border-b border-line transition-colors last:border-b-0",
+        email.unread ? "bg-surface" : "bg-inset/50"
       )}
     >
       <button
         type="button"
         onClick={toggle}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted/40"
+        className="flex min-h-12 w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-hover"
       >
         <Avatar email={email} size="sm" />
         <div className="min-w-0 flex-1">
@@ -223,7 +225,7 @@ function EmailCard({
       </button>
 
       {expanded && (
-        <div className="border-t border-border/60 px-3 py-2.5">
+        <div className="border-t border-line bg-inset px-3 py-2.5">
           {status === "loading" && (
             <div className="flex items-center gap-2">
               <span className="size-1.5 animate-pulse rounded-full bg-muted-foreground" />
@@ -256,7 +258,7 @@ function EmailCard({
 /** A single placeholder row shown while the inbox is loading. */
 function SkeletonCard() {
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-border/70 bg-background px-3 py-2.5">
+    <div className="flex items-start gap-3 border-b border-line bg-surface px-3 py-2.5 last:border-b-0">
       <span className="size-8 shrink-0 animate-pulse rounded-full bg-muted" />
       <div className="min-w-0 flex-1 space-y-1.5">
         <div className="flex items-center justify-between gap-2">
@@ -273,22 +275,24 @@ function SkeletonCard() {
 /** Loading placeholder for the `listEmails` tool while it fetches the inbox. */
 export function EmailResultsSkeleton({ label }: { label?: string }) {
   return (
-    <div className="my-2 flex flex-col gap-2">
-      <div className="flex items-center gap-2.5" aria-live="polite">
-        <span className="relative grid size-6 shrink-0 place-items-center rounded-lg bg-muted text-foreground/80 ring-1 ring-inset ring-border/60">
-          <span className="loop-halo absolute inset-0 rounded-lg bg-foreground/10" />
-          <MailIcon className="relative size-3.5" />
-        </span>
-        <span className="loop-shimmer text-[13px] font-medium">
-          {label ?? "Fetching your inbox…"}
-        </span>
-      </div>
-      <div className="flex flex-col gap-1.5">
+    <AgentCard
+      title="Inbox"
+      icon={<MailIcon className="size-3.5" />}
+      bodyClassName="p-0"
+      meta={
+        <LoadingState
+          label={label ?? "Fetching…"}
+          variant="dots"
+          className="gap-1.5 py-0 [&>span:nth-child(2)]:text-[11px]"
+        />
+      }
+    >
+      <div className="flex flex-col">
         <SkeletonCard />
         <SkeletonCard />
         <SkeletonCard />
       </div>
-    </div>
+    </AgentCard>
   )
 }
 
@@ -319,34 +323,25 @@ export function EmailResults({
   const label = unreadOnly ? "unread email" : "email"
 
   return (
-    <div className="my-2 flex flex-col gap-1.5">
-      <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-        <MailIcon className="size-3.5" />
-        {error ? (
-          <span className="text-destructive">Couldn&apos;t load emails: {error}</span>
-        ) : (
-          <span className="flex flex-wrap items-center gap-x-1.5">
-            <span>
-              {count} {label}
-              {count === 1 ? "" : "s"}
-              {query ? (
-                <>
-                  {" "}for{" "}
-                  <span className="font-medium text-foreground">“{query}”</span>
-                </>
-              ) : null}
-            </span>
-            {!unreadOnly && unreadCount > 0 && (
-              <span className="rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-600 dark:text-sky-400">
-                {unreadCount} unread
-              </span>
-            )}
-          </span>
-        )}
-      </div>
-
+    <AgentCard
+      title={query ? `Mail for “${query}”` : unreadOnly ? "Unread mail" : "Inbox"}
+      icon={<MailIcon className="size-3.5" />}
+      meta={error ? "Failed" : `${count} ${label}${count === 1 ? "" : "s"}`}
+      tone={error ? "danger" : "default"}
+      bodyClassName="p-0"
+    >
+      {error && (
+        <p className="px-3 py-3 text-[12px] text-destructive">
+          Couldn&apos;t load emails: {error}
+        </p>
+      )}
+      {!error && !unreadOnly && unreadCount > 0 && (
+        <div className="border-b border-line bg-inset px-3 py-1.5 text-[11px] font-medium text-accent-ink">
+          {unreadCount} unread
+        </div>
+      )}
       {!error && emails.length > 0 && (
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col">
           {emails.map((email) => (
             <EmailCard key={email.id} email={email} onOpen={onOpenEmail} />
           ))}
@@ -354,11 +349,11 @@ export function EmailResults({
       )}
 
       {!error && emails.length === 0 && (
-        <p className="text-[12px] text-muted-foreground/70">
+        <p className="px-3 py-3 text-[12px] text-muted-foreground/70">
           {unreadOnly ? "No unread emails." : "Nothing matched."}
         </p>
       )}
-    </div>
+    </AgentCard>
   )
 }
 
@@ -428,19 +423,22 @@ export function EmailDetailCard({
   if (!connected) return <ConnectGoogle />
   if (error) {
     return (
-      <p className="my-2 text-[12px] text-destructive">
-        Couldn&apos;t read that email: {error}
-      </p>
+      <AgentNotice
+        icon={<MailOpenIcon className="size-3.5" />}
+        title="Couldn’t read that email"
+        description={error}
+        tone="danger"
+      />
     )
   }
   if (!email) return null
 
   return (
-    <div className="my-2 overflow-hidden rounded-xl border border-border/70 bg-background">
+    <div className="my-2 overflow-hidden rounded-card bg-surface shadow-card">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-start gap-3 px-3.5 py-3 text-left transition-colors hover:bg-muted/40"
+        className="flex w-full items-start gap-3 px-3.5 py-3 text-left transition-colors hover:bg-hover"
       >
         <Avatar email={email} />
         <div className="min-w-0 flex-1">
@@ -476,7 +474,7 @@ export function EmailDetailCard({
         />
       </button>
       {open && (
-        <div className="border-t border-border/60 px-3.5 py-3">
+        <div className="border-t border-line bg-inset px-3.5 py-3">
           <div className="max-h-96 overflow-auto">
             <EmailBody body={email.body} />
           </div>
@@ -500,11 +498,11 @@ function ThreadMessage({
   const [open, setOpen] = useState(defaultOpen)
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border/70 bg-background">
+    <div className="overflow-hidden border-b border-line bg-surface last:border-b-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
+        className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-hover"
       >
         <Avatar email={message} size="sm" />
         <div className="min-w-0 flex-1">
@@ -530,7 +528,7 @@ function ThreadMessage({
         />
       </button>
       {open && (
-        <div className="border-t border-border/60 px-3 py-2.5">
+        <div className="border-t border-line bg-inset px-3 py-2.5">
           <EmailBody body={message.body} />
           <MessageActions email={message} onOpen={onOpen} className="mt-3" />
         </div>
@@ -573,45 +571,46 @@ export function EmailThread({
   if (!connected && messages.length === 0) return <ConnectGoogle />
   if (error) {
     return (
-      <p className="my-2 text-[12px] text-destructive">
-        Couldn&apos;t read that thread: {error}
-      </p>
+      <AgentNotice
+        icon={<MessagesSquareIcon className="size-3.5" />}
+        title="Couldn’t read that thread"
+        description={error}
+        tone="danger"
+      />
     )
   }
   if (messages.length === 0) return null
 
   return (
-    <div className="my-2 flex flex-col gap-1.5">
-      <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-        <MessagesSquareIcon className="size-3.5 shrink-0" />
-        <span className="min-w-0 truncate">
-          {count} message{count === 1 ? "" : "s"}
-          {subject ? (
-            <>
-              {" "}in{" "}
-              <span className="font-medium text-foreground">“{subject}”</span>
-            </>
-          ) : null}
-        </span>
-        {participants.length > 1 && (
-          <span className="ml-auto flex shrink-0 -space-x-1.5">
-            {participants.map((p) => (
-              <span
-                key={p.fromEmail || p.from}
-                className={cn(
-                  "grid size-5 place-items-center rounded-full text-[9px] font-semibold ring-2 ring-background",
-                  avatarTint(p.fromEmail || p.from)
-                )}
-                title={p.from}
-                aria-hidden
-              >
-                {initials(p.from)}
-              </span>
-            ))}
-          </span>
-        )}
-      </div>
-      <div className="flex flex-col gap-1.5">
+    <AgentCard
+      title={subject ? `“${subject}”` : "Email thread"}
+      icon={<MessagesSquareIcon className="size-3.5" />}
+      meta={`${count} message${count === 1 ? "" : "s"}`}
+      bodyClassName="p-0"
+      footer={
+        participants.length > 1 ? (
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[11px] text-ink-3">Participants</span>
+            <span className="flex shrink-0 -space-x-1.5">
+              {participants.map((participant) => (
+                <span
+                  key={participant.fromEmail || participant.from}
+                  className={cn(
+                    "grid size-5 place-items-center rounded-full text-[9px] font-semibold ring-2 ring-[var(--inset)]",
+                    avatarTint(participant.fromEmail || participant.from)
+                  )}
+                  title={participant.from}
+                  aria-hidden
+                >
+                  {initials(participant.from)}
+                </span>
+              ))}
+            </span>
+          </div>
+        ) : undefined
+      }
+    >
+      <div className="flex flex-col">
         {messages.map((message) => (
           <ThreadMessage
             key={message.id}
@@ -621,63 +620,192 @@ export function EmailThread({
           />
         ))}
       </div>
-    </div>
+    </AgentCard>
   )
 }
 
 /**
- * Generative-UI block for the `draftReply` tool: a read-only, email-styled
- * preview of a reply the assistant composed, with a copy action. (loop doesn't
- * send mail — this is a starting point the user can copy into Gmail.)
+ * Generative-UI block for the `draftReply` tool: an editable, email-styled
+ * reply the user can refine and copy. Loop does not send mail.
  */
 export function EmailDraftCard({ draft }: { draft: AgentDraft }) {
-  const [copied, setCopied] = useState(false)
+  const [to, setTo] = useState(draft.to)
+  const [subject, setSubject] = useState(draft.subject)
+  const [body, setBody] = useState(draft.body)
+  const [editing, setEditing] = useState(false)
+  const [copied, setCopied] = useState<"body" | "draft" | null>(null)
+  const copiedTimerRef = useRef<number | undefined>(undefined)
 
-  const copy = () => {
-    void navigator.clipboard?.writeText(draft.body)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+  useEffect(
+    () => () => window.clearTimeout(copiedTimerRef.current),
+    []
+  )
+
+  const edited = to !== draft.to || subject !== draft.subject || body !== draft.body
+  const wordCount = body.trim() ? body.trim().split(/\s+/).length : 0
+
+  const reset = () => {
+    setTo(draft.to)
+    setSubject(draft.subject)
+    setBody(draft.body)
+  }
+
+  const copy = async (target: "body" | "draft") => {
+    if (!navigator.clipboard) return
+    const text =
+      target === "body"
+        ? body
+        : [`To: ${to}`, `Subject: ${subject}`, "", body].join("\n")
+    try {
+      await navigator.clipboard.writeText(text)
+      window.clearTimeout(copiedTimerRef.current)
+      setCopied(target)
+      copiedTimerRef.current = window.setTimeout(() => setCopied(null), 1500)
+    } catch {
+      setCopied(null)
+    }
   }
 
   return (
-    <div className="my-2 overflow-hidden rounded-xl border border-border/70 bg-background">
-      <div className="flex items-center gap-1.5 border-b border-border/60 bg-muted/30 px-3.5 py-2 text-[12px] font-medium text-muted-foreground">
-        <PenLineIcon className="size-3.5" />
-        Draft reply
-      </div>
-      <div className="px-3.5">
-        <div className="flex gap-2 border-b border-border/50 py-2 text-[13px]">
-          <span className="w-14 shrink-0 text-muted-foreground">To</span>
-          <span className="min-w-0 flex-1 truncate text-foreground">
-            {draft.to || "—"}
-          </span>
-        </div>
-        <div className="flex gap-2 py-2 text-[13px]">
-          <span className="w-14 shrink-0 text-muted-foreground">Subject</span>
-          <span className="min-w-0 flex-1 truncate font-medium text-foreground">
-            {draft.subject || "(no subject)"}
-          </span>
-        </div>
-      </div>
-      <div className="border-t border-border/60 px-3.5 py-3">
-        <p className="font-sans text-[13px] leading-relaxed whitespace-pre-wrap text-foreground/90">
-          {draft.body}
-        </p>
-      </div>
-      <div className="flex items-center justify-end border-t border-border/60 px-3.5 py-2">
-        <button
-          type="button"
-          onClick={copy}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 px-2.5 py-1 text-[12px] font-medium text-foreground transition-colors hover:bg-muted"
-        >
-          {copied ? (
-            <CheckIcon className="size-3.5 text-emerald-500" />
-          ) : (
-            <CopyIcon className="size-3.5" />
+    <AgentCard
+      title="Draft reply"
+      icon={<PenLineIcon className="size-3.5" />}
+      meta={
+        <span className="inline-flex items-center gap-1.5">
+          <span>Not sent</span>
+          {edited && (
+            <>
+              <span className="size-1 rounded-full bg-orange" />
+              <span className="text-orange">Edited</span>
+            </>
           )}
-          {copied ? "Copied" : "Copy reply"}
-        </button>
-      </div>
-    </div>
+        </span>
+      }
+      bodyClassName="p-0"
+      footer={
+        <div className="flex flex-wrap items-center gap-2">
+          {editing ? (
+            <>
+              {edited && (
+                <button
+                  type="button"
+                  onClick={reset}
+                  className="inline-flex h-7 items-center gap-1.5 rounded-control px-2 text-[12px] font-medium text-ink-3 transition-[background-color,color,transform] hover:bg-hover hover:text-ink active:scale-[0.96]"
+                >
+                  <RotateCcwIcon className="size-3.5" />
+                  Reset
+                </button>
+              )}
+              <div className="ml-auto flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => void copy("draft")}
+                  className="inline-flex h-7 items-center gap-1.5 rounded-control px-2.5 text-[12px] font-medium text-ink-2 transition-[background-color,color,transform] hover:bg-hover hover:text-ink active:scale-[0.96]"
+                >
+                  {copied === "draft" ? (
+                    <CheckIcon className="size-3.5 text-green" />
+                  ) : (
+                    <CopyIcon className="size-3.5" />
+                  )}
+                  {copied === "draft" ? "Copied" : "Copy email"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditing(false)}
+                  className="inline-flex h-7 items-center rounded-control bg-ink px-3 text-[12px] font-medium text-canvas transition-[opacity,transform] hover:opacity-90 active:scale-[0.96]"
+                >
+                  Done
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="ml-auto flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="inline-flex h-7 items-center gap-1.5 rounded-control px-2.5 text-[12px] font-medium text-ink-2 transition-[background-color,color,transform] hover:bg-hover hover:text-ink active:scale-[0.96]"
+              >
+                <PenLineIcon className="size-3.5" />
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => void copy("body")}
+                className="inline-flex h-7 items-center gap-1.5 rounded-control bg-ink px-2.5 text-[12px] font-medium text-canvas transition-[opacity,transform] hover:opacity-90 active:scale-[0.96]"
+              >
+                {copied === "body" ? (
+                  <CheckIcon className="size-3.5 text-green" />
+                ) : (
+                  <CopyIcon className="size-3.5" />
+                )}
+                {copied === "body" ? "Copied" : "Copy reply"}
+              </button>
+            </div>
+          )}
+        </div>
+      }
+    >
+      {editing ? (
+        <>
+          <div className="px-3.5">
+            <label className="flex min-h-9 items-center gap-2 border-b border-line text-[13px] focus-within:text-ink">
+              <span className="w-14 shrink-0 text-ink-3">To</span>
+              <input
+                value={to}
+                onChange={(event) => setTo(event.target.value)}
+                aria-label="Draft recipient"
+                placeholder="Recipient"
+                className="min-w-0 flex-1 bg-transparent py-2 text-ink outline-none placeholder:text-ink-3"
+              />
+            </label>
+            <label className="flex min-h-9 items-center gap-2 text-[13px] focus-within:text-ink">
+              <span className="w-14 shrink-0 text-ink-3">Subject</span>
+              <input
+                value={subject}
+                onChange={(event) => setSubject(event.target.value)}
+                aria-label="Draft subject"
+                placeholder="Subject"
+                className="min-w-0 flex-1 bg-transparent py-2 font-medium text-ink outline-none placeholder:text-ink-3"
+              />
+            </label>
+          </div>
+          <div className="border-t border-line bg-inset/60 transition-colors focus-within:bg-surface">
+            <textarea
+              value={body}
+              onChange={(event) => setBody(event.target.value)}
+              aria-label="Draft body"
+              rows={7}
+              placeholder="Write a reply…"
+              className="min-h-36 w-full resize-y bg-transparent px-3.5 py-3 font-sans text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-3"
+            />
+            <div className="flex items-center justify-end px-3.5 pb-2 text-[10.5px] tabular-nums text-ink-3">
+              {wordCount} {wordCount === 1 ? "word" : "words"}
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="px-3.5">
+            <div className="flex gap-2 border-b border-line py-2 text-[13px]">
+              <span className="w-14 shrink-0 text-ink-3">To</span>
+              <span className="min-w-0 flex-1 truncate text-ink">
+                {to || "—"}
+              </span>
+            </div>
+            <div className="flex gap-2 py-2 text-[13px]">
+              <span className="w-14 shrink-0 text-ink-3">Subject</span>
+              <span className="min-w-0 flex-1 truncate font-medium text-ink">
+                {subject || "(no subject)"}
+              </span>
+            </div>
+          </div>
+          <div className="border-t border-line px-3.5 py-3">
+            <p className="font-sans text-[13px] leading-relaxed whitespace-pre-wrap text-ink/90">
+              {body || "No reply text yet."}
+            </p>
+          </div>
+        </>
+      )}
+    </AgentCard>
   )
 }

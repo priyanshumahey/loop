@@ -4,6 +4,7 @@ import { format } from "date-fns"
 import { ClockIcon, TrendingUpIcon } from "lucide-react"
 
 import { ConnectGoogle } from "@/components/cal/agent/connect-google"
+import { AgentCard, AgentNotice } from "@/components/agent"
 import type { CalendarStats } from "@/lib/cal-agent/tools"
 import { cn } from "@/lib/utils"
 
@@ -23,9 +24,12 @@ export function CalendarStatsCard({
   if (error && !connected) return <ConnectGoogle />
   if (error) {
     return (
-      <div className="my-2 text-[12px] text-destructive">
-        Couldn&apos;t compute stats: {error}
-      </div>
+      <AgentNotice
+        icon={<TrendingUpIcon className="size-3.5" />}
+        title="Couldn’t compute meeting stats"
+        description={error}
+        tone="danger"
+      />
     )
   }
   if (!stats) return null
@@ -39,16 +43,12 @@ export function CalendarStatsCard({
   const maxHours = Math.max(1, ...stats.byDay.map((d) => d.hours))
 
   return (
-    <div className="my-2 flex flex-col gap-3 rounded-xl border border-border/70 bg-background px-3.5 py-3">
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-          Meeting load
-        </span>
-        <span className="text-[11px] tabular-nums text-muted-foreground/80">
-          {rangeLabel}
-        </span>
-      </div>
-
+    <AgentCard
+      title="Meeting load"
+      icon={<TrendingUpIcon className="size-3.5" />}
+      meta={rangeLabel}
+      bodyClassName="flex flex-col gap-3"
+    >
       <div className="flex items-center gap-4">
         <Metric
           icon={<ClockIcon className="size-3.5" />}
@@ -69,9 +69,9 @@ export function CalendarStatsCard({
       </div>
 
       {stats.byDay.length > 0 && (
-        <div className="flex flex-col gap-1">
+        <div className="rounded-control bg-inset p-2 shadow-hairline">
           {stats.byDay.map((d) => (
-            <div key={d.day} className="flex items-center gap-2">
+            <div key={d.day} className="flex min-h-6 items-center gap-2">
               <span className="w-16 shrink-0 text-[11px] tabular-nums text-muted-foreground">
                 {d.day.replace(/^\w+ /, "")}
               </span>
@@ -88,7 +88,7 @@ export function CalendarStatsCard({
           ))}
         </div>
       )}
-    </div>
+    </AgentCard>
   )
 }
 

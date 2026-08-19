@@ -83,10 +83,10 @@ export function CopilotPanel({
           onClick={() => setCollapsed(false)}
           title="Open assistant"
           className={cn(
-            "flex h-full w-11 flex-col items-center justify-between rounded-2xl border bg-background py-3 shadow-sm transition-colors hover:bg-muted",
+            "flex h-full w-11 flex-col items-center justify-between rounded-window bg-surface py-3 shadow-card transition-colors hover:bg-hover",
             isEventOver
-              ? "border-primary ring-2 ring-primary/40"
-              : "border-border/70"
+              ? "ring-2 ring-primary/40"
+              : ""
           )}
         >
           <SparklesIcon className="size-4 text-foreground" />
@@ -124,14 +124,14 @@ export function CopilotPanel({
       <div
         ref={setNodeRef}
         className={cn(
-          "relative flex h-full w-full flex-col overflow-hidden rounded-2xl border bg-background shadow-sm transition-colors",
-          isEventOver ? "border-primary" : "border-border/70"
+          "relative flex h-full w-full flex-col overflow-hidden rounded-window bg-surface shadow-card transition-shadow",
+          isEventOver && "ring-2 ring-primary/40"
         )}
       >
         {/* Drop hint overlay shown while dragging an event over the panel */}
         {isEventOver && (
-          <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-2xl bg-primary/5 backdrop-blur-[1px]">
-            <div className="flex items-center gap-2 rounded-xl border border-primary/40 bg-background px-3 py-2 text-[13px] font-medium text-foreground shadow-sm">
+          <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-window bg-primary/5 backdrop-blur-[1px]">
+            <div className="flex items-center gap-2 rounded-card bg-surface px-3 py-2 text-[13px] font-medium text-ink shadow-raised">
               <CalendarPlusIcon className="size-4 text-primary" />
               Drop to add as context
             </div>

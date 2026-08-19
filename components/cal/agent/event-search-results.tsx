@@ -4,6 +4,7 @@ import { format, isSameDay } from "date-fns"
 import { CalendarSearchIcon, ChevronRightIcon, MapPinIcon } from "lucide-react"
 
 import { ConnectGoogle } from "@/components/cal/agent/connect-google"
+import { AgentCard } from "@/components/agent"
 import type { AgentEvent } from "@/lib/cal-agent/tools"
 import { cn } from "@/lib/utils"
 
@@ -39,7 +40,7 @@ function EventCard({
     <button
       type="button"
       onClick={() => onOpen?.(event)}
-      className="group flex w-full items-start gap-2.5 rounded-xl border border-border/70 bg-background px-3 py-2.5 text-left transition-colors hover:bg-muted/50"
+      className="group flex w-full items-start gap-2.5 border-b border-line px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-hover"
     >
       <span
         className={cn(
@@ -89,25 +90,18 @@ export function EventSearchResults({
   if (!connected && events.length === 0) return <ConnectGoogle />
 
   return (
-    <div className="my-2 flex flex-col gap-1.5">
-      <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-        <CalendarSearchIcon className="size-3.5" />
-        {error ? (
-          <span className="text-destructive">Search failed: {error}</span>
-        ) : (
-          <span>
-            {count} {count === 1 ? "result" : "results"}
-            {query ? (
-              <>
-                {" "}for <span className="font-medium text-foreground">“{query}”</span>
-              </>
-            ) : null}
-          </span>
-        )}
-      </div>
-
+    <AgentCard
+      title={query ? `Results for “${query}”` : "Event search"}
+      icon={<CalendarSearchIcon className="size-3.5" />}
+      meta={error ? "Failed" : `${count} ${count === 1 ? "result" : "results"}`}
+      tone={error ? "danger" : "default"}
+      bodyClassName={events.length > 0 && !error ? "p-0" : undefined}
+    >
+      {error && (
+        <p className="text-[12px] text-destructive">Search failed: {error}</p>
+      )}
       {!error && events.length > 0 && (
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col">
           {events.map((event) => (
             <EventCard key={event.id} event={event} onOpen={onOpenEvent} />
           ))}
@@ -115,10 +109,10 @@ export function EventSearchResults({
       )}
 
       {!error && events.length === 0 && (
-        <p className="rounded-lg border border-dashed border-border/70 px-3 py-2 text-[12px] text-muted-foreground">
+        <p className="text-[12px] text-muted-foreground">
           No matching events found.
         </p>
       )}
-    </div>
+    </AgentCard>
   )
 }

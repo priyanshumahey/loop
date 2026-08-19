@@ -14,7 +14,6 @@ import {
   CalendarSearchIcon,
   ChartColumnIcon,
   CheckIcon,
-  ChevronDownIcon,
   ClockIcon,
   CopyIcon,
   LayersIcon,
@@ -38,6 +37,13 @@ import { Streamdown } from "streamdown"
 import { ChatInput } from "@/components/chat/chat-input"
 import { useSmoothText } from "@/components/chat/use-smooth-text"
 import { LoopMark } from "@/components/loop-logo"
+import {
+  AgentContextCard,
+  AgentDisclosure,
+  AgentNotice,
+  FollowUpSuggestions,
+  LoadingState,
+} from "@/components/agent"
 import { AgendaList } from "@/components/cal/agent/agenda-list"
 import { AvailabilityCheck } from "@/components/cal/agent/availability-check"
 import { CalendarStatsCard } from "@/components/cal/agent/calendar-stats-card"
@@ -244,7 +250,7 @@ export function CalAgent({
   conversationId?: string
   /** Restored history to seed the chat with (parent remounts to switch). */
   initialMessages?: UIMessage[]
-  /** Called with the full history once a turn completes (for persistence). */
+  /** Called for durable approval checkpoints and completed turns. */
   onPersist?: (messages: UIMessage[]) => void
   /** Start a fresh chat (renders a header button when provided). */
   onNewChat?: () => void
@@ -447,15 +453,45 @@ export function CalAgent({
     }
   }, [messages, onMutated])
 
-  // Persist a completed turn (tool parts have outputs); skip while awaiting approval.
+  // Approval requests and decisions are durable checkpoints even though the
+  // surrounding turn may still be streaming. Persist each distinct snapshot
+  // immediately so a refresh cannot restore an older unanswered card.
+  const persistedApprovalRef = useRef<string | null>(null)
+  useEffect(() => {
+    const last = messages.at(-1)
+    if (last?.role !== "assistant") return
+
+    const approvalSignature = last.parts
+      .map((part) => {
+        const toolPart = part as {
+          state?: string
+          approval?: { id?: string; approved?: boolean }
+        }
+        if (
+          (toolPart.state !== "approval-requested" &&
+            toolPart.state !== "approval-responded") ||
+          !toolPart.approval?.id
+        ) {
+          return null
+        }
+        return `${toolPart.approval.id}:${toolPart.state}:${String(toolPart.approval.approved ?? "")}`
+      })
+      .filter((value): value is string => value !== null)
+      .join("|")
+
+    if (!approvalSignature) return
+    const persistencePhase = status === "ready" ? "settled" : "active"
+    const checkpoint = `${last.id}:${approvalSignature}:${persistencePhase}`
+    if (persistedApprovalRef.current === checkpoint) return
+    persistedApprovalRef.current = checkpoint
+    onPersist?.(messages)
+  }, [messages, onPersist, status])
+
+  // Persist a completed turn once all tool parts have outputs. Approval states
+  // are checkpointed independently above, including the transient response
+  // while its continuation request is starting.
   const prevStatus = useRef(status)
   useEffect(() => {
-    // `approval-requested` is a stable pause (the tool carries its signed
-    // approval id and is waiting for the user), so we DO persist it — that way a
-    // remount seeds the approval part directly and Approve works immediately,
-    // instead of relying on a stream replay to rebuild it. Only skip while
-    // `approval-responded`, which is transient (the follow-up send that runs the
-    // tool is about to fire) and would otherwise store a mid-execution state.
     const midApproval = messages.some((m) =>
       m.parts?.some(
         (p) =>
@@ -657,7 +693,7 @@ export function CalAgent({
             </div>
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-              <span className="grid size-10 place-items-center rounded-xl bg-foreground text-background">
+              <span className="grid size-10 place-items-center rounded-card bg-ink text-canvas shadow-card">
                 <SparklesIcon className="size-5" />
               </span>
               <div>
@@ -668,18 +704,11 @@ export function CalAgent({
                   Search events and get quick answers.
                 </p>
               </div>
-              <div className="flex w-full flex-col gap-1.5">
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => sendMessage({ text: s })}
-                    className="rounded-lg border border-border/70 bg-background px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
+              <FollowUpSuggestions
+                items={SUGGESTIONS}
+                onPick={(text) => sendMessage({ text })}
+                className="mx-0 max-w-full px-0 pt-0 pb-0"
+              />
             </div>
           )
         ) : (
@@ -705,7 +734,7 @@ export function CalAgent({
             ))}
             {isStreaming && messages.at(-1)?.role === "user" && (
               <AgentRow>
-                <ThinkingDots />
+                <LoadingState />
               </AgentRow>
             )}
           </div>
@@ -713,17 +742,24 @@ export function CalAgent({
       </div>
 
       {error && !isStreaming && (
-        <div className="mx-auto flex w-full max-w-2xl items-center gap-2 px-4 pb-2 text-[13px] text-destructive">
-          <TriangleAlertIcon className="size-4 shrink-0" />
-          <span className="flex-1">Something went wrong.</span>
-          <button
-            type="button"
-            onClick={() => regenerate()}
-            className="inline-flex items-center gap-1 rounded-lg border border-border/70 px-2 py-1 text-[12px] font-medium text-foreground transition-colors hover:bg-muted"
-          >
-            <RefreshCwIcon className="size-3.5" />
-            Retry
-          </button>
+        <div className="mx-auto w-full max-w-2xl px-4 pb-2">
+          <AgentNotice
+            icon={<TriangleAlertIcon className="size-3.5" />}
+            title="Something went wrong"
+            description="The assistant couldn’t finish that response."
+            tone="danger"
+            className="my-0"
+            action={
+              <button
+                type="button"
+                onClick={() => regenerate()}
+                className="inline-flex h-7 items-center gap-1 rounded-control bg-surface px-2.5 text-[12px] font-medium text-ink shadow-btn transition-colors hover:bg-hover"
+              >
+                <RefreshCwIcon className="size-3.5" />
+                Retry
+              </button>
+            }
+          />
         </div>
       )}
 
@@ -1357,10 +1393,10 @@ function MessageActions({
           type="button"
           onClick={copy}
           aria-label="Copy"
-          className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="grid size-7 place-items-center rounded-control text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
         >
           {copied ? (
-            <CheckIcon className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+            <CheckIcon className="size-3.5 text-green" />
           ) : (
             <CopyIcon className="size-3.5" />
           )}
@@ -1371,7 +1407,7 @@ function MessageActions({
           type="button"
           onClick={onRegenerate}
           aria-label="Regenerate"
-          className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="grid size-7 place-items-center rounded-control text-ink-3 transition-colors hover:bg-hover-2 hover:text-ink"
         >
           <RefreshCwIcon className="size-3.5" />
         </button>
@@ -1400,47 +1436,15 @@ function ContextEventCard({
   const details =
     contextEventRange(event) + (event.location ? ` · ${event.location}` : "")
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={onOpen}
-        title={details}
-        className={cn(
-          "flex w-full items-center gap-2.5 rounded-xl border border-border/70 bg-background py-2 pl-2 text-left shadow-sm transition-colors",
-          onRemove ? "pr-9" : "pr-3",
-          onOpen
-            ? "cursor-pointer hover:border-border hover:bg-muted/50"
-            : "cursor-default"
-        )}
-      >
-        <span
-          className={cn(
-            "grid size-8 shrink-0 place-items-center rounded-lg",
-            COLOR_TINT[event.color ?? "sky"] ?? COLOR_TINT.sky
-          )}
-        >
-          <CalendarIcon className="size-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-medium text-foreground">
-            {event.title}
-          </p>
-          {meta && (
-            <p className="truncate text-[11px] text-muted-foreground">{meta}</p>
-          )}
-        </div>
-      </button>
-      {onRemove && (
-        <button
-          type="button"
-          onClick={onRemove}
-          aria-label="Remove context"
-          className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <XIcon className="size-3.5" />
-        </button>
-      )}
-    </div>
+    <AgentContextCard
+      icon={<CalendarIcon className="size-4" />}
+      label={event.title}
+      meta={meta}
+      details={details}
+      onOpen={onOpen}
+      onRemove={onRemove}
+      iconClassName={COLOR_TINT[event.color ?? "sky"] ?? COLOR_TINT.sky}
+    />
   )
 }
 
@@ -1468,35 +1472,15 @@ function ContextEmailChip({
 }) {
   const when = contextEmailWhen(email)
   return (
-    <div className="relative flex items-center gap-2.5 rounded-xl border border-border/70 bg-background py-2 pr-2 pl-2 shadow-sm transition-colors hover:border-border hover:bg-muted/50">
-      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
-        <MailIcon className="size-4" />
-      </span>
-      <button
-        type="button"
-        onClick={onOpen}
-        disabled={!onOpen}
-        className="min-w-0 flex-1 text-left disabled:cursor-default"
-      >
-        <p className="truncate text-[13px] font-medium text-foreground">
-          {email.subject || "(no subject)"}
-        </p>
-        <p className="truncate text-[11px] text-muted-foreground">
-          {email.from}
-          {when ? ` · ${when}` : ""}
-        </p>
-      </button>
-      {onRemove && (
-        <button
-          type="button"
-          onClick={onRemove}
-          aria-label="Remove attached email"
-          className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <XIcon className="size-3.5" />
-        </button>
-      )}
-    </div>
+    <AgentContextCard
+      icon={<MailIcon className="size-4" />}
+      label={email.subject || "(no subject)"}
+      meta={`${email.from}${when ? ` · ${when}` : ""}`}
+      onOpen={onOpen}
+      onRemove={onRemove}
+      removeLabel="Remove attached email"
+      iconClassName="bg-sky-500/15 text-sky-600 dark:text-sky-400"
+    />
   )
 }
 
@@ -1555,13 +1539,13 @@ function ContextEventStack({
            * more; they never peek below it, so the stack reads cleanly. */}
           <span
             aria-hidden
-            className="absolute inset-x-7 -top-3 h-full rounded-xl border border-border/50 bg-muted/40 shadow-sm transition-transform duration-200 group-hover/stack:-translate-y-1"
+            className="absolute inset-x-7 -top-3 h-full rounded-card bg-inset shadow-hairline transition-transform duration-200 group-hover/stack:-translate-y-1"
           />
           <span
             aria-hidden
-            className="absolute inset-x-3.5 -top-1.5 h-full rounded-xl border border-border/60 bg-muted/20 shadow-sm transition-transform duration-200 group-hover/stack:-translate-y-0.5"
+            className="absolute inset-x-3.5 -top-1.5 h-full rounded-card bg-surface shadow-hairline transition-transform duration-200 group-hover/stack:-translate-y-0.5"
           />
-          <div className="relative flex items-center gap-2.5 rounded-xl border border-border/70 bg-background py-2 pr-2 pl-2 shadow-sm transition-colors group-hover/stack:border-border group-hover/stack:bg-muted/50">
+          <div className="relative flex items-center gap-2.5 rounded-card bg-surface py-2 pr-2 pl-2 shadow-card transition-colors group-hover/stack:bg-hover">
             <span
               className={cn(
                 "grid size-8 shrink-0 place-items-center rounded-lg",
@@ -1578,7 +1562,7 @@ function ContextEventStack({
                 {contextEventWhen(first)}
               </p>
             </div>
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-chip bg-inset px-2 py-0.5 text-[11px] font-semibold text-ink-3 shadow-hairline">
               <LayersIcon className="size-3" />
               {events.length}
             </span>
@@ -1596,13 +1580,13 @@ function ContextEventStack({
         onMouseLeave={scheduleClose}
         className="w-72 overflow-hidden p-0"
       >
-        <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
-          <LayersIcon className="size-3.5 text-muted-foreground" />
-          <p className="text-[12px] font-medium text-foreground">
+        <div className="flex items-center gap-2 border-b border-line bg-inset px-3 py-2">
+          <LayersIcon className="size-3.5 text-ink-3" />
+          <p className="text-[12px] font-medium text-ink">
             {events.length} attached events
           </p>
         </div>
-        <div className="max-h-64 space-y-1 overflow-y-auto p-1.5">
+        <div className="max-h-64 space-y-1 overflow-y-auto bg-surface p-1.5">
           {events.map((event) => (
             <ContextEventCard
               key={event.id}
@@ -1619,43 +1603,13 @@ function ContextEventStack({
 
 function AgentAvatar() {
   return (
-    <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-foreground text-background">
+    <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-control bg-ink text-canvas shadow-btn">
       <LoopMark className="h-4 w-[13px]" />
     </span>
   )
 }
 
 /** Assistant message row: avatar + name, with the content beside it. */
-/**
- * Predicted follow-up messages, shown as horizontally scrollable chips above
- * the composer once a turn finishes. Ordered most-likely first (leftmost).
- */
-function FollowUpSuggestions({
-  items,
-  onPick,
-}: {
-  items: string[]
-  onPick: (text: string) => void
-}) {
-  if (!items.length) return null
-  return (
-    <div className="mx-auto w-full max-w-2xl px-4 pt-2 pb-1">
-      <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {items.map((s, i) => (
-          <button
-            key={`${i}-${s}`}
-            type="button"
-            onClick={() => onPick(s)}
-            className="group inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/70 bg-background px-3 py-1.5 text-[13px] text-foreground/80 transition-colors hover:border-ring/50 hover:bg-muted/60 hover:text-foreground"
-          >
-            <span className="whitespace-nowrap">{s}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 function AgentRow({ children }: { children: React.ReactNode }) {
   return (
     <div className="group flex gap-3">
@@ -1666,19 +1620,6 @@ function AgentRow({ children }: { children: React.ReactNode }) {
         </p>
         {children}
       </div>
-    </div>
-  )
-}
-
-function ThinkingDots() {
-  return (
-    <div
-      className="flex items-center gap-1 py-1"
-      aria-label="Assistant is thinking"
-    >
-      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
-      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
-      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground" />
     </div>
   )
 }
@@ -1696,13 +1637,17 @@ function ToolActivity({
   label: string
 }) {
   return (
-    <div className="my-2 flex items-center gap-2.5" aria-live="polite">
-      <span className="relative grid size-6 shrink-0 place-items-center rounded-lg bg-muted text-foreground/80 ring-1 ring-inset ring-border/60">
-        <span className="loop-halo absolute inset-0 rounded-lg bg-foreground/10" />
-        <Icon className="relative size-3.5" />
-      </span>
-      <span className="loop-shimmer text-[13px] font-medium">{label}</span>
-    </div>
+    <LoadingState
+      label={label}
+      showElapsed
+      className="my-2 py-0"
+      indicator={
+        <span className="relative grid size-6 shrink-0 place-items-center rounded-lg bg-muted text-foreground/80 ring-1 ring-inset ring-border/60">
+          <span className="loop-halo absolute inset-0 rounded-lg bg-foreground/10" />
+          <Icon className="relative size-3.5" />
+        </span>
+      }
+    />
   )
 }
 
@@ -1751,36 +1696,15 @@ function ToolDisclosure({
   defaultOpen?: boolean
   children: React.ReactNode
 }) {
-  const [open, setOpen] = useState(defaultOpen)
-
   return (
-    <div className="my-1">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="group flex w-full items-center gap-2 rounded-lg px-1 py-0.5 text-left text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <Icon className="size-3.5 shrink-0 opacity-70 transition-opacity group-hover:opacity-100" />
-        <span className="min-w-0 flex-1 truncate text-[12.5px]">{summary}</span>
-        {typeof count === "number" && (
-          <span className="shrink-0 text-[11px] tabular-nums opacity-70">
-            {count}
-          </span>
-        )}
-        <ChevronDownIcon
-          className={cn(
-            "size-3.5 shrink-0 opacity-50 transition-all duration-200 group-hover:opacity-100",
-            open && "rotate-180"
-          )}
-        />
-      </button>
-      {open && (
-        <div className="mt-0.5 ml-[7px] border-l border-border/50 pl-3">
-          {children}
-        </div>
-      )}
-    </div>
+    <AgentDisclosure
+      title={summary}
+      icon={<Icon className="size-3.5" />}
+      meta={typeof count === "number" ? count : undefined}
+      defaultOpen={defaultOpen}
+    >
+      {children}
+    </AgentDisclosure>
   )
 }
 

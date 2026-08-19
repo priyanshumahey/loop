@@ -10,6 +10,7 @@ import {
 } from "lucide-react"
 
 import { EventTooltip } from "@/components/event-calendar/event-tooltip"
+import { AgentCard, AgentNotice, LoadingState } from "@/components/agent"
 import type {
   CalendarEvent,
   EventColor,
@@ -194,11 +195,40 @@ export function ProposedChange({
   const awaiting = state === "approval-requested"
 
   return (
-    <div className="my-2 flex flex-col gap-2 rounded-xl border border-border/70 bg-background px-3.5 py-3">
-      <div className="flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground">
-        {meta.icon}
-        {meta.label}
-      </div>
+    <AgentCard
+      title={meta.label}
+      icon={meta.icon}
+      tone={action === "delete" ? "danger" : "default"}
+      className="max-w-sm"
+      footer={
+        awaiting ? (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onApprove}
+              className="inline-flex h-7 items-center gap-1 rounded-control bg-ink px-3 text-[12px] font-medium text-canvas shadow-btn transition-[opacity,transform] hover:opacity-90 active:scale-[0.96]"
+            >
+              <CheckIcon className="size-3.5" />
+              Approve
+            </button>
+            <button
+              type="button"
+              onClick={onReject}
+              className="inline-flex h-7 items-center gap-1 rounded-control bg-surface px-3 text-[12px] font-medium text-ink-2 shadow-btn transition-[background-color,color,transform] hover:bg-hover hover:text-ink active:scale-[0.96]"
+            >
+              <XIcon className="size-3.5" />
+              Reject
+            </button>
+          </div>
+        ) : (
+          <LoadingState
+            label={state === "approval-responded" ? "Applying…" : "Preparing…"}
+            variant="dots"
+            className="py-0"
+          />
+        )
+      }
+    >
       <div className="flex flex-col gap-0.5">
         <div className="flex items-center gap-1.5 text-[14px] font-medium text-foreground">
           {input.color && (
@@ -212,7 +242,7 @@ export function ProposedChange({
           {title}
         </div>
         {range && (
-          <div className="text-[12px] text-muted-foreground tabular-nums">
+          <div className="text-[12px] tabular-nums text-muted-foreground">
             {range}
           </div>
         )}
@@ -225,39 +255,7 @@ export function ProposedChange({
           </div>
         )}
       </div>
-
-      {awaiting ? (
-        <div className="mt-1 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onApprove}
-            className="inline-flex items-center gap-1 rounded-lg bg-foreground px-3 py-1.5 text-[12px] font-medium text-background transition-opacity hover:opacity-90"
-          >
-            <CheckIcon className="size-3.5" />
-            Approve
-          </button>
-          <button
-            type="button"
-            onClick={onReject}
-            className="inline-flex items-center gap-1 rounded-lg border border-border/70 px-3 py-1.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted"
-          >
-            <XIcon className="size-3.5" />
-            Reject
-          </button>
-        </div>
-      ) : (
-        <div className="mt-0.5 flex items-center gap-2">
-          <span className="flex gap-0.5">
-            <span className="size-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.3s]" />
-            <span className="size-1 animate-bounce rounded-full bg-muted-foreground [animation-delay:-0.15s]" />
-            <span className="size-1 animate-bounce rounded-full bg-muted-foreground" />
-          </span>
-          <span className="loop-shimmer text-[12px] font-medium">
-            {state === "approval-responded" ? "Applying…" : "Preparing…"}
-          </span>
-        </div>
-      )}
-    </div>
+    </AgentCard>
   )
 }
 
@@ -270,17 +268,12 @@ function StatusRow({
   tone: "success" | "error" | "muted"
   children: React.ReactNode
 }) {
-  const color =
-    tone === "success"
-      ? "text-emerald-600 dark:text-emerald-400"
-      : tone === "error"
-        ? "text-destructive"
-        : "text-muted-foreground"
   return (
-    <div className={`my-2 flex items-center gap-1.5 text-[12px] ${color}`}>
-      <span className="shrink-0">{icon}</span>
-      {children}
-    </div>
+    <AgentNotice
+      icon={icon}
+      title={<span className="flex min-w-0 items-center gap-1.5">{children}</span>}
+      tone={tone === "success" ? "success" : tone === "error" ? "danger" : "muted"}
+    />
   )
 }
 

@@ -19,7 +19,12 @@ import { useEffect, useMemo, useState } from "react"
 
 import { ConnectGoogle } from "@/components/cal/agent/connect-google"
 import type { CalendarEvent, EventColor } from "@/components/event-calendar/types"
-import { Spinner } from "@/components/ui/loading-screen"
+import {
+  AgentCard,
+  AgentNotice,
+  FollowUpSuggestions,
+  LoadingState,
+} from "@/components/agent"
 import { syncEvents } from "@/lib/api/events"
 import { cn } from "@/lib/utils"
 
@@ -127,27 +132,30 @@ export function HomeBriefing({ onAsk }: { onAsk: (text: string) => void }) {
       </div>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
-          <Spinner />
-          Loading your briefing…
-        </div>
+        <LoadingState label="Loading your briefing…" variant="dots" />
       ) : !connected ? (
         <ConnectGoogle />
       ) : (
         <>
           {/* Quick stats */}
-          <div className="grid grid-cols-3 gap-2">
+          <AgentCard
+            title="This week"
+            icon={<SparklesIcon className="size-3.5" />}
+            bodyClassName="grid grid-cols-3 gap-3"
+          >
             <Stat value={String(summary.todays.length)} label="today" />
-            <Stat value={String(summary.meetingCount)} label="this week" />
-            <Stat value={`${summary.totalHours}h`} label="in meetings" />
-          </div>
+            <Stat value={String(summary.meetingCount)} label="meetings" />
+            <Stat value={`${summary.totalHours}h`} label="scheduled" />
+          </AgentCard>
 
           {summary.conflicts > 0 && (
-            <div className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-400">
-              <TriangleAlertIcon className="size-3.5 shrink-0" />
-              {summary.conflicts} overlapping{" "}
-              {summary.conflicts === 1 ? "event" : "events"} today
-            </div>
+            <AgentNotice
+              icon={<TriangleAlertIcon className="size-3.5" />}
+              title={`${summary.conflicts} overlapping ${summary.conflicts === 1 ? "event" : "events"}`}
+              description="Your calendar has a conflict today."
+              tone="warning"
+              className="my-0"
+            />
           )}
 
           {/* Next up */}
@@ -156,21 +164,22 @@ export function HomeBriefing({ onAsk }: { onAsk: (text: string) => void }) {
           )}
 
           {/* Today's agenda */}
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-1.5 px-0.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              <CalendarIcon className="size-3" />
-              Today
-            </div>
+          <AgentCard
+            title="Today"
+            icon={<CalendarIcon className="size-3.5" />}
+            meta={`${summary.todays.length} ${summary.todays.length === 1 ? "event" : "events"}`}
+            bodyClassName="p-0"
+          >
             {summary.todays.length === 0 ? (
-              <p className="rounded-lg border border-dashed border-border/70 px-3 py-2.5 text-[13px] text-muted-foreground">
+              <p className="px-3 py-3 text-[13px] text-muted-foreground">
                 Nothing scheduled today. Enjoy the open time.
               </p>
             ) : (
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col">
                 {summary.todays.map((event) => (
                   <div
                     key={event.id}
-                    className="flex items-center gap-2.5 rounded-lg border border-border/60 bg-background px-3 py-2"
+                    className="flex min-h-10 items-center gap-2.5 border-b border-line px-3 last:border-b-0"
                   >
                     <span
                       className={cn(
@@ -190,7 +199,7 @@ export function HomeBriefing({ onAsk }: { onAsk: (text: string) => void }) {
                 ))}
               </div>
             )}
-          </div>
+          </AgentCard>
 
           {/* Suggested actions */}
           <div className="flex flex-col gap-1.5">
@@ -198,19 +207,11 @@ export function HomeBriefing({ onAsk }: { onAsk: (text: string) => void }) {
               <SparklesIcon className="size-3" />
               Ask the assistant
             </div>
-            <div className="flex flex-col gap-1.5">
-              {SUGGESTIONS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => onAsk(s)}
-                  className="group flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-background px-3 py-2 text-left text-[13px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-                >
-                  {s}
-                  <ArrowRightIcon className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
-                </button>
-              ))}
-            </div>
+            <FollowUpSuggestions
+              items={SUGGESTIONS}
+              onPick={onAsk}
+              className="mx-0 max-w-none px-0 pt-0 pb-0"
+            />
           </div>
 
           <Link
@@ -228,7 +229,7 @@ export function HomeBriefing({ onAsk }: { onAsk: (text: string) => void }) {
 
 function Stat({ value, label }: { value: string; label: string }) {
   return (
-    <div className="rounded-xl border border-border/70 bg-background px-3 py-2.5">
+    <div className="min-w-0">
       <div className="text-lg font-semibold text-foreground">{value}</div>
       <div className="text-[11px] text-muted-foreground">{label}</div>
     </div>
@@ -239,21 +240,19 @@ function NextUp({ event }: { event: CalendarEvent }) {
   const start = new Date(event.start)
   const relative = formatDistanceToNowStrict(start, { addSuffix: true })
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-border/70 bg-muted/40 px-3.5 py-3">
-      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-foreground text-background">
-        <ClockIcon className="size-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-          Next up · {relative}
-        </div>
-        <div className="truncate text-[14px] font-medium text-foreground">
+    <AgentCard
+      title="Next up"
+      icon={<ClockIcon className="size-3.5" />}
+      meta={relative}
+    >
+      <div className="min-w-0">
+        <div className="truncate text-[14px] font-medium text-ink">
           {event.title || "Untitled"}
         </div>
-        <div className="text-[12px] tabular-nums text-muted-foreground">
+        <div className="text-[12px] tabular-nums text-ink-3">
           {format(start, "EEE h:mm a")} – {format(new Date(event.end), "h:mm a")}
         </div>
       </div>
-    </div>
+    </AgentCard>
   )
 }

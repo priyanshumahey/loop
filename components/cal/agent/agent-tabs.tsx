@@ -39,17 +39,17 @@ export function AgentTabs({
   const recent = [...conversations].sort((a, b) => b.updatedAt - a.updatedAt)
 
   return (
-    <div className="flex shrink-0 items-center gap-1 border-b border-border/60 px-2 py-1.5">
+    <div className="flex shrink-0 items-center gap-1 border-b border-line bg-inset/50 px-2 py-1">
       {/* Scrollable open tabs */}
       <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <button
           type="button"
           onClick={onNewChat}
           className={cn(
-            "inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 text-xs transition-colors",
+            "inline-flex h-7 shrink-0 items-center gap-1 rounded-control px-2 text-xs transition-colors",
             isDraft
-              ? "border-border bg-muted text-foreground"
-              : "border-transparent text-muted-foreground hover:bg-muted/60"
+              ? "bg-surface text-ink"
+              : "text-ink-3 hover:bg-hover hover:text-ink"
           )}
         >
           <PlusIcon className="size-3.5" />
@@ -60,10 +60,10 @@ export function AgentTabs({
           <div
             key={conv.id}
             className={cn(
-              "inline-flex h-7 shrink-0 items-center gap-1 rounded-md border pl-2 pr-1",
+              "inline-flex h-7 shrink-0 items-center gap-1 rounded-control pl-2 pr-1 transition-colors",
               activeId === conv.id
-                ? "border-border bg-muted text-foreground"
-                : "border-transparent text-muted-foreground hover:bg-muted/60"
+                ? "bg-surface text-ink"
+                : "text-ink-3 hover:bg-hover hover:text-ink"
             )}
           >
             <button
@@ -98,9 +98,9 @@ export function AgentTabs({
           <button
             type="button"
             className={cn(
-              "inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 text-xs transition-colors",
-              "border-transparent text-muted-foreground hover:bg-muted/60",
-              historyOpen && "border-border bg-muted text-foreground"
+              "inline-flex h-7 shrink-0 items-center gap-1 rounded-control px-2 text-xs transition-colors",
+              "text-ink-3 hover:bg-hover hover:text-ink",
+              historyOpen && "bg-surface text-ink"
             )}
           >
             History
@@ -110,10 +110,10 @@ export function AgentTabs({
           </button>
         </PopoverTrigger>
         <PopoverContent align="end" sideOffset={6} className="w-64 p-0">
-          <div className="px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          <div className="bg-inset px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-ink-3">
             Recent conversations
           </div>
-          <div className="h-px bg-border" />
+          <div className="h-px bg-line" />
           <div className="max-h-72 overflow-y-auto p-1">
             {recent.length === 0 ? (
               <p className="px-2 py-4 text-center text-xs text-muted-foreground">
@@ -126,8 +126,8 @@ export function AgentTabs({
                   <div
                     key={conv.id}
                     className={cn(
-                      "group flex items-center gap-1 rounded-md px-2 py-1.5 text-xs hover:bg-muted/60",
-                      openIds.has(conv.id) ? "text-foreground" : "text-muted-foreground"
+                      "group flex items-center gap-1 rounded-control px-2 py-1.5 text-xs hover:bg-hover",
+                      openIds.has(conv.id) ? "text-ink" : "text-ink-3"
                     )}
                   >
                     <button

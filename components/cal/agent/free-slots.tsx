@@ -4,6 +4,7 @@ import { format, isSameDay } from "date-fns"
 import { ClockIcon, MoonIcon, SunriseIcon } from "lucide-react"
 
 import { ConnectGoogle } from "@/components/cal/agent/connect-google"
+import { AgentCard, AgentNotice } from "@/components/agent"
 import type { FreeSlot } from "@/lib/cal-agent/tools"
 
 /** Hours outside of which a slot counts as early-morning or late-night. */
@@ -54,16 +55,21 @@ export function FreeSlots({
   if (!connected && slots.length === 0) return <ConnectGoogle />
   if (error) {
     return (
-      <div className="my-2 text-[12px] text-destructive">
-        Couldn&apos;t find slots: {error}
-      </div>
+      <AgentNotice
+        icon={<ClockIcon className="size-3.5" />}
+        title="Couldn’t find open time"
+        description={error}
+        tone="danger"
+      />
     )
   }
   if (slots.length === 0) {
     return (
-      <p className="my-2 rounded-lg border border-dashed border-border/70 px-3 py-2 text-[12px] text-muted-foreground">
-        No open {durationMinutes}-minute slots in that window.
-      </p>
+      <AgentNotice
+        icon={<ClockIcon className="size-3.5" />}
+        title="No open slots found"
+        description={`There are no ${durationMinutes}-minute openings in that window.`}
+      />
     )
   }
 
@@ -71,19 +77,20 @@ export function FreeSlots({
   const hasOffHours = slots.some((s) => offHours(s) !== null)
 
   return (
-    <div className="my-2 flex flex-col gap-2.5">
-      <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
-        <ClockIcon className="size-3.5" />
-        Open {durationMinutes}-minute slots
-        {hasOffHours && (
-          <span className="text-muted-foreground/70">
-            · includes early-morning / late-night times
-          </span>
-        )}
-      </div>
+    <AgentCard
+      title={`Open ${durationMinutes}-minute slots`}
+      icon={<ClockIcon className="size-3.5" />}
+      meta={`${slots.length} ${slots.length === 1 ? "option" : "options"}`}
+      bodyClassName="flex flex-col gap-2.5"
+    >
+      {hasOffHours && (
+        <p className="text-[11px] text-ink-3">
+          Includes early-morning or late-night options
+        </p>
+      )}
       {groups.map((group) => (
         <div key={group.day.toISOString()} className="flex flex-col gap-1">
-          <div className="px-0.5 text-[11px] font-medium text-muted-foreground/80">
+          <div className="px-0.5 text-[11px] font-medium text-ink-3">
             {format(group.day, "EEEE, MMM d")}
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -101,7 +108,7 @@ export function FreeSlots({
                         ? "Late night · Use this slot"
                         : "Use this slot"
                   }
-                  className="flex items-center gap-1 rounded-lg border border-border/70 bg-background px-2.5 py-1 text-[12px] text-foreground tabular-nums transition-colors hover:bg-muted/60"
+                    className="flex h-7 items-center gap-1 rounded-chip bg-surface px-2.5 text-[12px] tabular-nums text-ink shadow-btn transition-[background-color,transform] hover:bg-hover active:scale-[0.98]"
                 >
                   {off === "early" && (
                     <SunriseIcon className="size-3 text-amber-500" />
@@ -117,6 +124,6 @@ export function FreeSlots({
           </div>
         </div>
       ))}
-    </div>
+    </AgentCard>
   )
 }

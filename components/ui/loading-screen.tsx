@@ -1,6 +1,7 @@
 import { Loader2Icon } from "lucide-react"
 
 import { LoopMark } from "@/components/loop-logo"
+import { LoadingState } from "@/components/agent"
 import { cn } from "@/lib/utils"
 
 /** A small inline spinner. */
@@ -37,10 +38,7 @@ export function LoadingScreen({
         <LoopMark className="h-6 w-[22px]" />
         <span className="absolute inset-0 animate-ping rounded-2xl bg-foreground/15" />
       </span>
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Spinner />
-        {message}
-      </div>
+      <LoadingState label={message} variant="orbit" showElapsed />
     </div>
   )
 }

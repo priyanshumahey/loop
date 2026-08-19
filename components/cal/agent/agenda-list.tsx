@@ -4,6 +4,7 @@ import { format, isSameDay } from "date-fns"
 import { CalendarIcon, ChevronRightIcon, MapPinIcon } from "lucide-react"
 
 import { ConnectGoogle } from "@/components/cal/agent/connect-google"
+import { AgentCard, AgentNotice } from "@/components/agent"
 import type { AgentEvent } from "@/lib/cal-agent/tools"
 import { cn } from "@/lib/utils"
 
@@ -51,36 +52,45 @@ export function AgendaList({
   if (!connected && events.length === 0) return <ConnectGoogle />
   if (error) {
     return (
-      <div className="my-2 text-[12px] text-destructive">
-        Couldn&apos;t load events: {error}
-      </div>
+      <AgentNotice
+        icon={<CalendarIcon className="size-3.5" />}
+        title="Couldn’t load events"
+        description={error}
+        tone="danger"
+      />
     )
   }
   if (events.length === 0) {
     return (
-      <p className="my-2 rounded-lg border border-dashed border-border/70 px-3 py-2 text-[12px] text-muted-foreground">
-        Nothing scheduled in that range.
-      </p>
+      <AgentNotice
+        icon={<CalendarIcon className="size-3.5" />}
+        title="Nothing scheduled"
+        description="There are no events in that range."
+      />
     )
   }
 
   const groups = groupByDay(events)
 
   return (
-    <div className="my-2 flex flex-col gap-3">
+    <AgentCard
+      title="Agenda"
+      icon={<CalendarIcon className="size-3.5" />}
+      meta={`${events.length} ${events.length === 1 ? "event" : "events"}`}
+      bodyClassName="flex flex-col gap-0 p-0"
+    >
       {groups.map((group) => (
-        <div key={group.day.toISOString()} className="flex flex-col gap-1">
-          <div className="flex items-center gap-1.5 px-0.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            <CalendarIcon className="size-3" />
+        <div key={group.day.toISOString()} className="flex flex-col">
+          <div className="border-b border-line bg-inset px-3 py-1.5 text-[11px] font-medium text-ink-3">
             {format(group.day, "EEEE, MMM d")}
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col">
             {group.items.map((event) => (
               <button
                 key={event.id}
                 type="button"
                 onClick={() => onOpenEvent?.(event)}
-                className="group flex w-full items-center gap-2.5 rounded-lg border border-border/60 bg-background px-3 py-2 text-left transition-colors hover:bg-muted/50"
+                className="group flex min-h-10 w-full items-center gap-2.5 border-b border-line px-3 text-left transition-colors last:border-b-0 hover:bg-hover"
               >
                 <span
                   className={cn(
@@ -103,6 +113,6 @@ export function AgendaList({
           </div>
         </div>
       ))}
-    </div>
+    </AgentCard>
   )
 }

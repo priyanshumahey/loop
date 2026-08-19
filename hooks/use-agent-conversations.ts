@@ -19,7 +19,7 @@ const MAX_CONVERSATIONS = 40
 export interface AgentConversation {
   id: string
   title: string
-  /** Full UIMessage history, including completed tool-call parts. */
+  /** Full UIMessage history, including tool calls and approval checkpoints. */
   messages: UIMessage[]
   createdAt: number
   updatedAt: number
@@ -261,9 +261,9 @@ export function useAgentConversations(
   }, [])
 
   /**
-   * Upsert the active conversation with a completed message history. Called
-   * only when a turn has fully finished, so every tool-call part carries its
-   * `output` and no partial/streaming state is written to storage.
+    * Upsert the active conversation at durable checkpoints: the user's message,
+    * approval requests and decisions, and completed assistant turns. Ephemeral
+    * token-by-token streaming snapshots are not written.
    */
   const persist = useCallback(
     (messages: UIMessage[]) => {

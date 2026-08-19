@@ -51,6 +51,33 @@
     --color-surface-container-high: var(--muted);
     --color-surface-container-higher: var(--accent);
     --color-surface-container-highest: var(--accent);
+    --color-canvas: var(--canvas);
+    --color-ink: var(--ink);
+    --color-ink-2: var(--ink-2);
+    --color-ink-3: var(--ink-3);
+    --color-line: var(--line);
+    --color-line-strong: var(--line-strong);
+    --color-field: var(--field);
+    --color-inset: var(--inset);
+    --color-hover: var(--hover);
+    --color-hover-2: var(--hover-2);
+    --color-accent-ink: var(--accent-ink);
+    --color-accent-tint: var(--accent-tint);
+    --color-green: var(--green);
+    --color-green-tint: var(--green-tint);
+    --color-orange: var(--orange);
+    --color-orange-tint: var(--orange-tint);
+    --color-red: var(--red);
+    --color-red-tint: var(--red-tint);
+    --radius-card: var(--bui-radius-card);
+    --radius-control: var(--bui-radius-control);
+    --radius-chip: var(--bui-radius-chip);
+    --radius-window: var(--bui-radius-window);
+    --shadow-hairline: var(--bui-shadow-hairline);
+    --shadow-btn: var(--bui-shadow-btn);
+    --shadow-card: var(--bui-shadow-card);
+    --shadow-raised: var(--bui-shadow-raised);
+    --shadow-overlay: var(--bui-shadow-overlay);
     --radius-sm: calc(var(--radius) * 0.6);
     --radius-md: calc(var(--radius) * 0.8);
     --radius-lg: var(--radius);
@@ -95,6 +122,37 @@
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
+    --canvas: var(--background);
+    --surface: var(--card);
+    --inset: color-mix(in oklab, var(--muted) 55%, var(--background));
+    --hover: var(--muted);
+    --hover-2: var(--accent);
+    --ink: var(--foreground);
+    --ink-2: color-mix(in oklab, var(--foreground) 72%, var(--muted-foreground));
+    --ink-3: var(--muted-foreground);
+    --line: color-mix(in oklab, var(--border) 62%, transparent);
+    --line-strong: color-mix(in oklab, var(--border) 88%, transparent);
+    --field: var(--muted);
+    --accent-ink: var(--brand);
+    --accent-tint: color-mix(in oklab, var(--brand) 10%, var(--background));
+    --green: oklch(0.603 0.155 150.883);
+    --green-tint: oklch(0.958 0.017 159.118);
+    --orange: oklch(0.689 0.179 49.902);
+    --orange-tint: oklch(0.964 0.021 67.581);
+    --red: oklch(0.621 0.192 23.042);
+    --red-tint: oklch(0.956 0.017 17.462);
+    --bui-radius-card: 12px;
+    --bui-radius-control: 8px;
+    --bui-radius-chip: 7px;
+    --bui-radius-window: 14px;
+    --bui-shadow-hairline: 0 0 0 1px var(--line);
+    --bui-shadow-btn: 0 0 0 1px var(--line-strong), 0 1px 2px rgb(0 0 0 / 0.04);
+    --bui-shadow-card: 0 0 0 1px var(--line), 0 2px 6px rgb(0 0 0 / 0.06);
+    --bui-shadow-raised: 0 0 0 1px var(--line), 0 8px 24px rgb(0 0 0 / 0.1);
+    --bui-shadow-overlay: 0 0 0 1px var(--line), 0 16px 40px rgb(0 0 0 / 0.16);
+    --tooltip-bg: var(--popover);
+    --tooltip-fg: var(--popover-foreground);
+    --tooltip-muted: var(--muted-foreground);
 }
 
 .dark {
@@ -131,6 +189,12 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+    --green: oklch(0.72 0.14 151);
+    --green-tint: oklch(0.27 0.035 151);
+    --orange: oklch(0.76 0.15 60);
+    --orange-tint: oklch(0.28 0.035 60);
+    --red: oklch(0.72 0.16 24);
+    --red-tint: oklch(0.27 0.04 24);
 }
 
 @layer base {
@@ -145,6 +209,135 @@
     @apply font-sans;
     overscroll-behavior: none;
     }
+}
+
+@layer components {
+  .primitive-card-pad {
+    padding: 0.75rem;
+  }
+  .primitive-card-bar {
+    min-height: 2.5rem;
+    padding: 0.625rem 0.75rem;
+  }
+  .primitive-card-footer {
+    min-height: 2.75rem;
+    padding: 0.5rem 0.75rem;
+  }
+  .primitive-icon-button {
+    display: inline-flex;
+    width: 1.75rem;
+    height: 1.75rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--bui-radius-control);
+  }
+  .animated-underline {
+    position: relative;
+    display: inline-block;
+  }
+  .animated-underline::after {
+    position: absolute;
+    right: 0;
+    bottom: -1px;
+    left: 0;
+    height: 1px;
+    content: "";
+    background: currentColor;
+    transform: scaleX(0);
+    transform-origin: right;
+    transition: transform 180ms ease;
+  }
+  .animated-underline:hover::after {
+    transform: scaleX(1);
+    transform-origin: left;
+  }
+  .source-avatar {
+    object-fit: cover;
+    box-shadow: 0 0 0 1px rgb(0 0 0 / 0.1);
+  }
+  .bui-stream-text {
+    animation: bui-stream-in 180ms ease-out both;
+  }
+  .insight-chart-stage {
+    overflow: hidden;
+    touch-action: none;
+  }
+  .insight-chart-cursor {
+    position: absolute;
+    z-index: 4;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    pointer-events: none;
+    background: var(--ink);
+    opacity: 0.26;
+  }
+  .insight-chart-tooltip-anchor {
+    position: absolute;
+    z-index: 5;
+    top: 0.5rem;
+    pointer-events: none;
+    transform: translateX(-50%);
+  }
+  .insight-chart-tooltip {
+    min-width: 9.625rem;
+    padding: 0.5625rem 0.625rem;
+    color: var(--tooltip-fg);
+    background: var(--tooltip-bg);
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    box-shadow: var(--bui-shadow-overlay);
+    font-size: 0.75rem;
+  }
+  .insight-chart-tooltip-time {
+    display: block;
+    margin-bottom: 0.4375rem;
+    color: var(--tooltip-muted);
+    font-size: 0.6875rem;
+  }
+  .insight-chart-tooltip-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    line-height: 1.65;
+  }
+  .insight-chart-tooltip-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4375rem;
+  }
+  .insight-chart-tooltip-row strong {
+    color: var(--tooltip-muted);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+  }
+  .insight-chart-tooltip-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    flex: 0 0 0.5rem;
+    border-radius: 999px;
+  }
+  .filter-status-todo,
+  .filter-status-progress,
+  .filter-status-done {
+    border: 1px solid transparent;
+  }
+  .filter-status-todo {
+    color: var(--orange);
+    background: var(--orange-tint);
+    border-color: color-mix(in oklab, var(--orange) 24%, transparent);
+  }
+  .filter-status-progress {
+    color: var(--accent-ink);
+    background: var(--accent-tint);
+    border-color: color-mix(in oklab, var(--brand) 24%, transparent);
+  }
+  .filter-status-done {
+    color: var(--green);
+    background: var(--green-tint);
+    border-color: color-mix(in oklab, var(--green) 24%, transparent);
+  }
 }
 
 /* Soft sky gradient with drifting clouds, used behind hero sections. */
@@ -285,6 +478,122 @@
   animation: loop-halo 1.9s ease-in-out infinite;
 }
 
+@keyframes bui-pixel-on {
+  0%,
+  100% {
+    opacity: 0.15;
+    transform: scale(0.85);
+  }
+  45%,
+  60% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+}
+
+@keyframes bui-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes bui-stream-in {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer-text {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes stream-in {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+@keyframes pixel-on {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  18%,
+  42% {
+    opacity: 1;
+  }
+  62% {
+    opacity: 0.15;
+  }
+}
+
+@keyframes eq-bounce {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .loop-shimmer {
     animation: none;
@@ -292,5 +601,20 @@
   }
   .loop-halo {
     animation: none;
+  }
+  [style*="bui-pixel-on"] {
+    animation: none !important;
+  }
+  [style*="bui-fade-up"],
+  [style*="fade-in"],
+  [style*="fade-up"],
+  [style*="pop-in"],
+  [style*="shimmer-text"],
+  [style*="stream-in"],
+  [style*="pixel-on"],
+  [style*="eq-bounce"],
+  [style*="spin"],
+  .bui-stream-text {
+    animation: none !important;
   }
 }

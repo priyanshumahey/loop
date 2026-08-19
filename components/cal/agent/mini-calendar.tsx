@@ -13,11 +13,12 @@ import {
   startOfMonth,
   startOfWeek,
 } from "date-fns"
-import { RefreshCwIcon } from "lucide-react"
+import { CalendarRangeIcon, RefreshCwIcon } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
 import { ConnectGoogle } from "@/components/cal/agent/connect-google"
 import type { CalendarEvent } from "@/components/event-calendar/types"
+import { AgentCard, AgentNotice } from "@/components/agent"
 import { syncEvents } from "@/lib/api/events"
 import type { AgentEvent, CalendarView } from "@/lib/cal-agent/tools"
 import { cn } from "@/lib/utils"
@@ -151,26 +152,31 @@ export function MiniCalendar({
   // Only surface the tool-time error before any live data has loaded.
   if (error && live === null) {
     return (
-      <div className="my-2 text-[12px] text-destructive">
-        Couldn&apos;t load your calendar: {error}
-      </div>
+      <AgentNotice
+        icon={<CalendarRangeIcon className="size-3.5" />}
+        title="Couldn’t load your calendar"
+        description={error}
+        tone="danger"
+      />
     )
   }
 
   const anchor = new Date(rangeStart)
+  const title =
+    view === "day"
+      ? format(anchor, "EEEE, MMMM d")
+      : view === "week"
+        ? `Week of ${format(startOfWeek(anchor), "MMM d")}`
+        : format(anchor, "MMMM yyyy")
 
   return (
-    <div className="my-2 overflow-hidden rounded-xl border border-border/70 bg-background">
-      <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
-        <span className="text-[12px] font-medium text-foreground">
-          {view === "day"
-            ? format(anchor, "EEEE, MMMM d")
-            : view === "week"
-              ? `Week of ${format(startOfWeek(anchor), "MMM d")}`
-              : format(anchor, "MMMM yyyy")}
-        </span>
+    <AgentCard
+      title={title}
+      icon={<CalendarRangeIcon className="size-3.5" />}
+      bodyClassName="p-0"
+      meta={
         <div className="flex items-center gap-2">
-          <span className="text-[11px] tabular-nums text-muted-foreground">
+          <span className="text-[11px] tabular-nums text-ink-3">
             {shownEvents.length} {shownEvents.length === 1 ? "event" : "events"}
           </span>
           <button
@@ -179,13 +185,13 @@ export function MiniCalendar({
             disabled={syncing}
             aria-label="Refresh calendar"
             title="Refresh"
-            className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-60"
+            className="grid size-6 place-items-center rounded-[6px] text-ink-3 transition-colors hover:bg-hover hover:text-ink disabled:opacity-60"
           >
             <RefreshCwIcon className={cn("size-3", syncing && "animate-spin")} />
           </button>
         </div>
-      </div>
-
+      }
+    >
       {view === "day" && (
         <DayView day={anchor} events={shownEvents} onOpenEvent={onOpenEvent} />
       )}
@@ -195,7 +201,7 @@ export function MiniCalendar({
       {view === "month" && (
         <MonthView anchor={anchor} events={shownEvents} onOpenEvent={onOpenEvent} />
       )}
-    </div>
+    </AgentCard>
   )
 }
 

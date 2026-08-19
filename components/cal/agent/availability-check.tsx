@@ -9,6 +9,7 @@ import {
 } from "lucide-react"
 
 import { ConnectGoogle } from "@/components/cal/agent/connect-google"
+import { AgentCard, AgentNotice } from "@/components/agent"
 import type {
   AgentEvent,
   AvailabilityCheck as AvailabilityData,
@@ -34,9 +35,12 @@ export function AvailabilityCheck({
 }) {
   if (result.error) {
     return (
-      <div className="my-2 text-[12px] text-destructive">
-        Couldn&apos;t check that time: {result.error}
-      </div>
+      <AgentNotice
+        icon={<CalendarXIcon className="size-3.5" />}
+        title="Couldn’t check that time"
+        description={result.error}
+        tone="danger"
+      />
     )
   }
 
@@ -48,48 +52,49 @@ export function AvailabilityCheck({
 
   if (!result.verified && result.conflicts.length === 0) {
     return (
-      <div className="my-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3.5 py-3">
-        <div className="text-[13px] font-medium text-foreground">
-          Couldn&apos;t refresh Google Calendar
-        </div>
+      <AgentCard
+        title="Couldn’t refresh Google Calendar"
+        icon={<CalendarXIcon className="size-3.5" />}
+        tone="warning"
+      >
         <p className="mt-0.5 text-[12px] text-muted-foreground">
           I can&apos;t verify that this time is free yet. Please try again.
         </p>
-      </div>
+      </AgentCard>
     )
   }
 
   const conflictCount = result.conflicts.length
   return (
-    <div className="my-2 overflow-hidden rounded-xl border border-border/70 bg-background">
-      <div className="flex items-start gap-2.5 px-3.5 py-3">
-        {result.available ? (
-          <CalendarCheckIcon className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+    <AgentCard
+      title={
+        result.available
+          ? "This time is available"
+          : `${conflictCount} ${conflictCount === 1 ? "conflict" : "conflicts"}`
+      }
+      icon={
+        result.available ? (
+          <CalendarCheckIcon className="size-3.5 text-green" />
         ) : (
-          <CalendarXIcon className="mt-0.5 size-4 shrink-0 text-rose-600 dark:text-rose-400" />
-        )}
-        <div className="min-w-0">
-          <div className="text-[13px] font-medium text-foreground">
-            {result.available
-              ? "This time is available"
-              : `${conflictCount} ${conflictCount === 1 ? "conflict" : "conflicts"}`}
-          </div>
-          <div className="mt-0.5 text-[12px] text-muted-foreground tabular-nums">
-            {formatWindow(result.start, result.end)}
-          </div>
-        </div>
+          <CalendarXIcon className="size-3.5 text-red" />
+        )
+      }
+      tone={result.available ? "success" : "danger"}
+      bodyClassName={conflictCount > 0 ? "pb-0" : undefined}
+    >
+      <div className="text-[12px] tabular-nums text-muted-foreground">
+        {formatWindow(result.start, result.end)}
       </div>
-
       {conflictCount > 0 && (
-        <div className="border-t border-border/60">
+        <div className="mt-3 -mx-3 overflow-hidden border-t border-line bg-inset">
           {result.conflicts.map((event) => (
             <button
               key={event.id}
               type="button"
               onClick={() => onOpenEvent?.(event)}
-              className="group flex w-full items-center gap-2 border-b border-border/50 px-3.5 py-2 text-left last:border-b-0 hover:bg-muted/50"
+              className="group flex min-h-9 w-full items-center gap-2 border-b border-line px-3 text-left transition-colors last:border-b-0 hover:bg-hover"
             >
-              <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">
+              <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink">
                 {event.title}
               </span>
               {event.location && (
@@ -105,6 +110,6 @@ export function AvailabilityCheck({
           ))}
         </div>
       )}
-    </div>
+    </AgentCard>
   )
 }

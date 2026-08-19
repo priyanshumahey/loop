@@ -1266,7 +1266,7 @@ const readThread = tool({
   },
 })
 
-/** A reply the assistant composed, shown as a read-only email-style card. */
+/** A reply the assistant composed, shown as an editable email-style card. */
 export interface AgentDraft {
   to: string
   subject: string
@@ -1276,7 +1276,7 @@ export interface AgentDraft {
 /**
  * Compose a draft reply and surface it as an email-styled card. Does NOT send —
  * loop has no send capability; this gives the user a ready-to-copy starting
- * point. Read-only.
+ * point the user can refine before copying.
  */
 const draftReply = tool({
   description:
