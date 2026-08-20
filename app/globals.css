@@ -85,6 +85,7 @@
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
+    --color-highlight: var(--highlight);
 }
 
 :root {
@@ -153,6 +154,7 @@
     --tooltip-bg: var(--popover);
     --tooltip-fg: var(--popover-foreground);
     --tooltip-muted: var(--muted-foreground);
+    --highlight: oklch(0.852 0.199 91.936);
 }
 
 .dark {
@@ -195,6 +197,7 @@
     --orange-tint: oklch(0.28 0.035 60);
     --red: oklch(0.72 0.16 24);
     --red-tint: oklch(0.27 0.04 24);
+    --highlight: oklch(0.852 0.199 91.936);
 }
 
 @layer base {
