@@ -25,7 +25,6 @@ import {
   PanelRightCloseIcon,
   PenSquareIcon,
   RefreshCwIcon,
-  SparklesIcon,
   TriangleAlertIcon,
   XIcon,
   ZapIcon,
@@ -36,6 +35,10 @@ import { Streamdown } from "streamdown"
 
 import { ChatInput } from "@/components/chat/chat-input"
 import { useSmoothText } from "@/components/chat/use-smooth-text"
+import {
+  DocumentLibraryTool,
+  isDocumentLibraryToolType,
+} from "@/components/documents/document-library-tool"
 import { LoopMark } from "@/components/loop-logo"
 import {
   AgentContextCard,
@@ -213,12 +216,13 @@ function contextEventToAgentEvent(event: ContextEvent): AgentEvent {
 }
 
 const SUGGESTIONS = [
-  "What events do I have this week?",
-  "Find my meetings with the design team",
-  "Do I have any interviews coming up?",
+  "Plan my day across calendar and email",
+  "Find emails related to my next meeting",
+  "Turn this week's meetings into a prep brief",
 ]
 
 const AGENT_NAME = "Loop Agent"
+export type AgentSurface = "home" | "calendar" | "mail"
 
 // Turn keys we've already tried to resume, so a remount / React double-invoke
 // never fires a second overlapping reconnect on the same (registry-cached) Chat
@@ -229,6 +233,7 @@ const resumedTurns = new Set<string>()
 
 export function CalAgent({
   conversationId,
+  surface = "home",
   initialMessages,
   onPersist,
   onNewChat,
@@ -248,6 +253,8 @@ export function CalAgent({
 }: {
   /** Stable id for this conversation; enables resuming an in-flight stream. */
   conversationId?: string
+  /** Current app surface, used to make a shared conversation page-aware. */
+  surface?: AgentSurface
   /** Restored history to seed the chat with (parent remounts to switch). */
   initialMessages?: UIMessage[]
   /** Called for durable approval checkpoints and completed turns. */
@@ -314,9 +321,10 @@ export function CalAgent({
                 ? Intl.DateTimeFormat().resolvedOptions().timeZone
                 : undefined,
             autoApprove,
+            surface,
           },
         }),
-      [autoApprove]
+      [autoApprove, surface]
     ),
     // Resume generation after the user approves/rejects a tool.
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
@@ -557,6 +565,7 @@ export function CalAgent({
       signal: controller.signal,
       body: JSON.stringify({
         messages,
+        surface,
         timezone:
           typeof Intl !== "undefined"
             ? Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -576,7 +585,7 @@ export function CalAgent({
         // best-effort; ignore aborts and failures
       })
     return () => controller.abort()
-  }, [status, messages])
+  }, [status, messages, surface])
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -632,10 +641,11 @@ export function CalAgent({
             <button
               type="button"
               onClick={onClose}
-              aria-label="Collapse panel"
+              aria-label="Close assistant"
               className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
-              <PanelRightCloseIcon className="size-4" />
+              <XIcon className="size-4 sm:hidden" />
+              <PanelRightCloseIcon className="hidden size-4 sm:block" />
             </button>
           )}
           {headerLeading ?? (
@@ -649,13 +659,16 @@ export function CalAgent({
             type="button"
             onClick={() => setAutoApprove((v) => !v)}
             aria-pressed={autoApprove}
+            aria-label={
+              autoApprove ? "Disable automatic approval" : "Enable automatic approval"
+            }
             title={
               autoApprove
-                ? "Auto-approve is ON — the agent applies calendar changes without asking"
-                : "Auto-approve is OFF — you confirm each calendar change"
+                ? "Auto-approve is ON — the agent applies workspace changes without asking"
+                : "Auto-approve is OFF — you confirm calendar and document changes"
             }
             className={cn(
-              "flex h-8 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium transition-colors",
+              "grid size-8 place-items-center rounded-lg text-[12px] font-medium transition-colors sm:flex sm:w-auto sm:gap-1.5 sm:px-2",
               autoApprove
                 ? "bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -664,7 +677,7 @@ export function CalAgent({
             <ZapIcon
               className={cn("size-3.5", autoApprove && "fill-current")}
             />
-            Auto
+            <span className="hidden sm:inline">Auto</span>
           </button>
           {onNewChat && (
             <button
@@ -694,14 +707,14 @@ export function CalAgent({
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
               <span className="grid size-10 place-items-center rounded-card bg-ink text-canvas shadow-card">
-                <SparklesIcon className="size-5" />
+                <LoopMark className="h-5 w-[17px]" />
               </span>
               <div>
                 <p className="text-sm font-medium text-foreground">
-                  Ask about your calendar
+                  Ask Loop
                 </p>
                 <p className="mt-1 text-[13px] text-muted-foreground">
-                  Search events and get quick answers.
+                  Work across your calendar, inbox, and documents.
                 </p>
               </div>
               <FollowUpSuggestions
@@ -892,6 +905,17 @@ function MessageView({
           if (part.type === "text") {
             return (
               <AssistantText key={i} text={part.text} streaming={streaming} />
+            )
+          }
+
+          if (isDocumentLibraryToolType(part.type)) {
+            return (
+              <DocumentLibraryTool
+                key={i}
+                part={part as unknown as import("@/components/documents/document-library-tool").DocumentLibraryToolPartData}
+                onApprove={onApprove}
+                onReject={onReject}
+              />
             )
           }
 

@@ -14,6 +14,10 @@ import {
 } from "@/lib/cal-agent/resumable"
 import { APPROVAL_TOOLS, buildCalendarTools } from "@/lib/cal-agent/tools"
 import { persistConversationServer } from "@/lib/db/agent-conversations-server"
+import {
+  buildDocumentTools,
+  DOCUMENT_LIBRARY_APPROVAL_TOOLS,
+} from "@/lib/document-agent/tools"
 import { createClient } from "@/lib/supabase/server"
 
 export const runtime = "nodejs"
@@ -21,7 +25,10 @@ export const maxDuration = 30
 
 /** Per-tool approval config: every mutating tool requires user confirmation. */
 const toolApproval = Object.fromEntries(
-  APPROVAL_TOOLS.map((name) => [name, "user-approval" as const])
+  [...APPROVAL_TOOLS, ...DOCUMENT_LIBRARY_APPROVAL_TOOLS].map((name) => [
+    name,
+    "user-approval" as const,
+  ])
 )
 
 /**
@@ -59,6 +66,16 @@ function timeContext(timeZone?: string): string {
   } catch {
     return `The current UTC date and time is ${now.toISOString()}.`
   }
+}
+
+function surfaceContext(surface?: "home" | "calendar" | "mail"): string {
+  if (surface === "mail") {
+    return "You are currently embedded beside the user's inbox. Prefer email-first framing, but use calendar and document tools whenever they advance the task."
+  }
+  if (surface === "calendar") {
+    return "You are currently embedded beside the user's calendar. Prefer schedule-first framing, but use email and document tools whenever they add needed context or produce a useful artifact."
+  }
+  return "You are on the user's general workspace home. Choose the most relevant combination of calendar, email, and document tools for the task."
 }
 
 /**
@@ -136,9 +153,9 @@ function withEventContext(messages: UIMessage[]): UIMessage[] {
 
 /**
  * POST /api/cal-agent
- * The calendar assistant. Streams an answer that may call calendar tools; tool
- * results are streamed back as typed message parts the client renders as custom
- * UI. Multi-step so the model can search, read results, then respond.
+ * The shared workspace assistant. Streams an answer that may call calendar,
+ * email, and document tools; typed results render as custom UI. Multi-step so
+ * the model can search, read results, connect context, then respond.
  */
 export async function POST(req: Request) {
   const supabase = await createClient()
@@ -150,17 +167,20 @@ export async function POST(req: Request) {
   let messages: UIMessage[]
   let timezone: string | undefined
   let chatId: string | undefined
+  let surface: "home" | "calendar" | "mail" | undefined
   let autoApprove = false
   try {
     ;({
       messages,
       timezone,
       id: chatId,
+      surface,
       autoApprove = false,
     } = (await req.json()) as {
       messages: UIMessage[]
       timezone?: string
       id?: string
+      surface?: "home" | "calendar" | "mail"
       autoApprove?: boolean
     })
   } catch {
@@ -179,7 +199,8 @@ export async function POST(req: Request) {
     system: [
       "You are Loop's assistant.",
       timeContext(timezone),
-      "Help the user find, understand, and plan around events on their calendar. You can also read their Gmail inbox.",
+      surfaceContext(surface),
+      "Help the user work across their calendar, Gmail, and documents as one connected workspace.",
       "Each event may include a description (notes/agenda) and location; use them to answer questions about what a meeting is about.",
       "Be proactive and think a step ahead. Don't just answer the literal question — anticipate what the user is really trying to accomplish and help them get there.",
       "When it's genuinely useful, surface things they didn't ask about but would want to know: scheduling conflicts or double-bookings, back-to-back meetings with no gap, a meeting missing a location or agenda, an event that likely needs prep, or an email that looks like it needs a reply.",
@@ -201,6 +222,15 @@ export async function POST(req: Request) {
       "- readEmail: to open one specific message in full (body included) after listEmails, e.g. when the user asks what an email says or to summarize it. Reuse the id from the listEmails result.",
       "- readThread: to read an entire conversation (all replies) when the user asks about a thread, reply chain, or the 'whole conversation'. Reuse the threadId from a listEmails or readEmail result.",
       "- draftReply: when the user asks to draft, write, or reply to an email. First read the email/thread for context, then call draftReply with a composed to, subject, and body (in the user's voice). It shows a copy-ready draft card; it does NOT send.",
+      "- listUserDocuments: find documents by title or recency before reading, organizing, or deleting one.",
+      "- readUserDocument: read a specific document in full after resolving its stable id with listUserDocuments. Use it when the user asks what a document says, wants details from it, or needs it compared with email or calendar context.",
+      "- createNewDocument: create a brief, plan, meeting note, draft, or other durable artifact. Ground it in the emails, events, and documents you actually read. This requires approval.",
+      "- listUserFolders / createNewFolder / moveDocumentToFolder / deleteUserFolder: inspect and organize the document library. Resolve stable ids before mutations; mutations require approval.",
+      "- deleteUserDocument: permanently delete a document only when the user clearly asks. Resolve its id first; this requires approval.",
+      "Cross-domain work:",
+      "- Treat calendar, email, and documents as connected context. Follow references across them instead of telling the user to switch pages or paste content.",
+      "- For meeting preparation, combine the current event, related full email threads, and relevant documents when available, then offer to create or update a useful document.",
+      "- When creating a document from email or calendar research, include only facts found in tool results or provided by the user; never invent missing details.",
       "Email research — be thorough, not lazy:",
       "- Snippets are TRUNCATED. They are fine for a quick count or triage, but they routinely omit phone numbers, addresses, agendas, action items, and instructions. Whenever the user wants details, contacts, logistics, action items, or 'everything about X', open the full body with readEmail (or readThread for a chain) for the most relevant messages — do not answer those from snippets alone.",
       "- Before searching for a specific detail (like someone's phone number or email address), first read the full body of messages you already retrieved — the answer is often buried in an email you've already seen but never opened.",
@@ -221,7 +251,10 @@ export async function POST(req: Request) {
       // a result. Keep the usable history instead of rejecting the next turn.
       ignoreIncompleteToolCalls: true,
     }),
-    tools: buildCalendarTools(timezone),
+    tools: {
+      ...buildCalendarTools(timezone),
+      ...buildDocumentTools(undefined, { useLiveEditor: true }),
+    },
     // When the user has enabled auto-approve, skip the confirmation gate so
     // mutating tools execute directly within the same turn.
     toolApproval: autoApprove ? undefined : toolApproval,

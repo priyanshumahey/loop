@@ -24,6 +24,7 @@ export function ChatHome({ initialChatId }: { initialChatId?: string }) {
         <div className="flex h-full flex-col overflow-hidden rounded-window bg-surface shadow-card">
           <CalAgent
             key={store.activeId}
+            surface="home"
             conversationId={store.activeId}
             initialMessages={store.activeConversation?.messages}
             onPersist={store.persist}
