@@ -3,6 +3,13 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { createShader, playSweep, accentChain, ACCENTS } from "glimm";
 
+import { AgentContextPicker } from "@/components/agent/context-picker";
+import {
+  agentContextItemKey,
+  agentContextItemLabel,
+  type AgentContextItem,
+} from "@/lib/agent-context";
+
 /* The built-in "prism" palette is only cyan→indigo→magenta, so a sweep
  * reads as blue/purple. Build a true full-spectrum rainbow instead. */
 const RAINBOW = accentChain([
@@ -152,6 +159,8 @@ type PromptBarProps = {
   onStop?: () => void;
   footerLeading?: ReactNode;
   showModelSelector?: boolean;
+  contextItems?: AgentContextItem[];
+  onContextItemsChange?: (items: AgentContextItem[]) => void;
 };
 
 export default function PromptBar({
@@ -163,6 +172,8 @@ export default function PromptBar({
   onStop,
   footerLeading,
   showModelSelector = true,
+  contextItems = [],
+  onContextItemsChange,
 }: PromptBarProps) {
   const pill = variant === "Pill";
   const controlled = value !== undefined;
@@ -207,8 +218,9 @@ export default function PromptBar({
   };
 
   const token = dismissed ? null : parseToken(draft);
-  const menu: "at" | "slash" | null = plusOpen ? "at" : token?.kind ?? null;
-  const query = plusOpen ? "" : token?.query ?? "";
+  const usesContextPicker = productionMode && onContextItemsChange !== undefined;
+  const menu: "at" | "slash" | null = plusOpen && !usesContextPicker ? "at" : token?.kind ?? null;
+  const query = plusOpen && !usesContextPicker ? "" : token?.query ?? "";
 
   const rows: { key: string; name: string; desc: string }[] =
     menu === "at"
@@ -386,7 +398,7 @@ export default function PromptBar({
     inputRef.current?.focus();
   };
 
-  const canSend = draft.trim().length > 0 || attachments.length > 0;
+  const canSend = draft.trim().length > 0 || attachments.length > 0 || contextItems.length > 0;
   const send = () => {
     if (isStreaming) {
       onStop?.();
@@ -411,6 +423,17 @@ export default function PromptBar({
     >
       {/* composer is the anchor — menus grow up from its top edge */}
       <div className="relative">
+      {plusOpen && usesContextPicker && (
+        <AgentContextPicker
+          attached={contextItems}
+          onAttach={(item) => {
+            const key = agentContextItemKey(item);
+            if (!contextItems.some((current) => agentContextItemKey(current) === key)) {
+              onContextItemsChange([...contextItems, item]);
+            }
+          }}
+        />
+      )}
       {/* ── @ / slash menu ─────────────────────────────── */}
       {menu && (
         <div
@@ -532,7 +555,7 @@ export default function PromptBar({
       {/* ── composer ───────────────────────────────────── */}
       <div
         className={`relative isolate flex flex-col gap-1.5 overflow-hidden border border-line bg-surface p-1.5 shadow-card transition-[border-color,border-radius] duration-150 focus-within:border-line-strong ${
-          pill ? (attachments.length > 0 || expanded ? "rounded-[24px]" : "rounded-full") : "rounded-[14px]"
+          pill ? (attachments.length > 0 || contextItems.length > 0 || expanded ? "rounded-[24px]" : "rounded-full") : "rounded-[14px]"
         }`}
       >
         {/* rainbow glimm sweep — plays across the interior on model change.
@@ -552,7 +575,7 @@ export default function PromptBar({
           {draft}
         </span>
 
-        {attachments.length > 0 && (
+        {(attachments.length > 0 || contextItems.length > 0) && (
           <div className={`flex flex-wrap gap-1.5 pt-0.5 ${pill ? "px-1" : "px-0.5"}`}>
             {attachments.map((file, i) => (
               <span
@@ -576,6 +599,31 @@ export default function PromptBar({
                 </button>
               </span>
             ))}
+            {contextItems.map((item) => {
+              const key = agentContextItemKey(item);
+              const label = agentContextItemLabel(item);
+              return (
+                <span
+                  key={key}
+                  className={`flex h-6.5 items-center gap-1.5 bg-field py-1 pr-1 pl-1.5 text-[11.5px] text-ink-2 shadow-hairline ${
+                    pill ? "rounded-full" : "rounded-chip"
+                  }`}
+                >
+                  <Icon size={12}><g><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></g></Icon>
+                  <span className="max-w-44 truncate">{label}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${label}`}
+                    onClick={() => onContextItemsChange?.(contextItems.filter((current) => agentContextItemKey(current) !== key))}
+                    className={`flex size-4 items-center justify-center text-ink-3 transition-colors duration-100 hover:bg-line/70 hover:text-ink ${
+                      pill ? "rounded-full" : "rounded-[4px]"
+                    }`}
+                  >
+                    <Icon size={10} strokeWidth={2.5}><path d="M18 6L6 18M6 6l12 12" /></Icon>
+                  </button>
+                </span>
+              );
+            })}
           </div>
         )}
 

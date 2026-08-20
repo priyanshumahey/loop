@@ -9,10 +9,13 @@ import {
 } from "ai"
 import {
   ArrowRightIcon,
+  CalendarIcon,
   CheckIcon,
   CopyIcon,
   FilePlus2Icon,
   FileSearchIcon,
+  FileTextIcon,
+  MailIcon,
   PanelRightCloseIcon,
   QuoteIcon,
   RefreshCwIcon,
@@ -33,6 +36,7 @@ import { Streamdown } from "streamdown"
 
 import {
   AgentCard,
+  AgentContextCard,
   FollowUpSuggestions,
   PromptBar,
 } from "@/components/agent"
@@ -51,6 +55,14 @@ import {
 } from "@/components/documents/document-library-tool"
 import type { AgentConversationScope } from "@/lib/db/agent-conversations"
 import type { AgentEmail, AgentEvent, FreeSlot } from "@/lib/cal-agent/tools"
+import {
+  agentContextMetadata,
+  type AgentContextDocument,
+  type AgentContextEmail,
+  type AgentContextEvent,
+  type AgentContextItem,
+  type AgentContextMetadata,
+} from "@/lib/agent-context"
 import {
   isEditorToolName,
   isEditorWriteToolName,
@@ -155,6 +167,7 @@ function DocumentAgentSession(
 ) {
   const router = useRouter()
   const [draft, setDraft] = useState("")
+  const [contextItems, setContextItems] = useState<AgentContextItem[]>([])
   const [selectedTextContext, setSelectedTextContext] =
     useState<SelectedTextContext | null>(null)
   const [autoApprove, setAutoApprove] = usePersistentState(
@@ -237,17 +250,28 @@ function DocumentAgentSession(
   const streaming = status === "submitted" || status === "streaming"
 
   const send = useCallback(
-    async (text: string, context?: SelectedTextContext) => {
-      const next = text.trim()
+    async (
+      text: string,
+      context?: SelectedTextContext,
+      attachedItems: AgentContextItem[] = []
+    ) => {
+      const sourceMetadata = agentContextMetadata(attachedItems)
+      const next = text.trim() || (sourceMetadata ? "Use the attached context." : "")
       if (!next || streaming) return
       await onBeforeSend?.()
       const attachedContext = context ?? selectedTextContext ?? undefined
       if (!attachedContext) onEditorEditSettled?.()
       sendMessage({
         text: next,
-        metadata: attachedContext
-          ? { selectedTextContext: attachedContext }
-          : undefined,
+        metadata:
+          attachedContext || sourceMetadata
+            ? {
+                ...sourceMetadata,
+                ...(attachedContext
+                  ? { selectedTextContext: attachedContext }
+                  : {}),
+              }
+            : undefined,
       })
       setSelectedTextContext(null)
     },
@@ -270,6 +294,12 @@ function DocumentAgentSession(
   const openEmail = useCallback(
     (email: AgentEmail) => {
       router.push(`/mail?email=${encodeURIComponent(email.id)}`)
+    },
+    [router]
+  )
+  const openDocument = useCallback(
+    (documentId: string) => {
+      router.push(`/documents/${encodeURIComponent(documentId)}`)
     },
     [router]
   )
@@ -302,18 +332,20 @@ function DocumentAgentSession(
       if (pendingRequest.context) {
         setSelectedTextContext(pendingRequest.context)
       }
-      await send(pendingRequest.text, pendingRequest.context)
+      await send(pendingRequest.text, pendingRequest.context, [])
     })
     return () => {
       cancelled = true
     }
   }, [onPendingRequestHandled, pendingRequest, send, streaming])
 
-  const submit = () => {
-    const next = draft.trim()
-    if (!next) return
+  const submit = (submittedValue: string) => {
+    const next = submittedValue.trim()
+    if (!next && contextItems.length === 0) return
     setDraft("")
-    void send(next)
+    const attachedItems = contextItems
+    setContextItems([])
+    void send(next, undefined, attachedItems)
   }
 
   const approve = useCallback(
@@ -602,6 +634,7 @@ function DocumentAgentSession(
                 onRejectClientTool={rejectClientTool}
                 onOpenEvent={openEvent}
                 onOpenEmail={openEmail}
+                onOpenDocument={openDocument}
                 onPickSlot={pickSlot}
                 onRegenerate={index === messages.length - 1 ? regenerate : undefined}
               />
@@ -647,6 +680,8 @@ function DocumentAgentSession(
           isStreaming={streaming}
           onStop={stop}
           showModelSelector={false}
+          contextItems={contextItems}
+          onContextItemsChange={setContextItems}
           footerLeading={
             <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-line px-2.5 text-[11px] font-medium text-ink-3">
               <LoopMark className="h-3.5 w-3" /> Loop
@@ -714,6 +749,7 @@ function WriterMessage({
   onRejectClientTool,
   onOpenEvent,
   onOpenEmail,
+  onOpenDocument,
   onPickSlot,
   onRegenerate,
 }: {
@@ -729,6 +765,7 @@ function WriterMessage({
   onRejectClientTool: (toolName: string, toolCallId: string) => void
   onOpenEvent: (event: AgentEvent) => void
   onOpenEmail: (email: AgentEmail) => void
+  onOpenDocument: (documentId: string) => void
   onPickSlot: (slot: FreeSlot) => void
   onRegenerate?: () => void
 }) {
@@ -742,6 +779,7 @@ function WriterMessage({
         | { selectedTextContext?: SelectedTextContext }
         | undefined
     )?.selectedTextContext
+    const sourceContext = message.metadata as AgentContextMetadata | undefined
     return (
       <div className="flex flex-col items-end gap-1.5">
         {selectedContext && (
@@ -749,6 +787,14 @@ function WriterMessage({
             <SelectedTextContextChip context={selectedContext} />
           </div>
         )}
+        <WriterSourceContext
+          events={sourceContext?.contextEvents ?? []}
+          emails={sourceContext?.contextEmails ?? []}
+          documents={sourceContext?.contextDocuments ?? []}
+          onOpenEvent={onOpenEvent}
+          onOpenEmail={onOpenEmail}
+          onOpenDocument={onOpenDocument}
+        />
         <div className="max-w-[88%] rounded-card rounded-br-[4px] bg-field px-3 py-2 text-[13px] leading-relaxed text-ink shadow-hairline">
           {text}
         </div>
@@ -793,6 +839,101 @@ function WriterMessage({
       </div>
     </div>
   )
+}
+
+function WriterSourceContext({
+  events,
+  emails,
+  documents,
+  onOpenEvent,
+  onOpenEmail,
+  onOpenDocument,
+}: {
+  events: AgentContextEvent[]
+  emails: AgentContextEmail[]
+  documents: AgentContextDocument[]
+  onOpenEvent: (event: AgentEvent) => void
+  onOpenEmail: (email: AgentEmail) => void
+  onOpenDocument: (documentId: string) => void
+}) {
+  if (!events.length && !emails.length && !documents.length) return null
+  return (
+    <div className="flex w-72 max-w-[92%] flex-col gap-1.5">
+      {events.map((event) => (
+        <AgentContextCard
+          key={`event:${event.id}`}
+          icon={<CalendarIcon className="size-4" />}
+          label={event.title || "Untitled event"}
+          meta={contextDate(event.start, event.allDay ? "All day" : undefined)}
+          details={event.location}
+          onOpen={() => onOpenEvent(contextEventToAgentEvent(event))}
+          iconClassName="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+        />
+      ))}
+      {emails.map((email) => (
+        <AgentContextCard
+          key={`email:${email.id}`}
+          icon={<MailIcon className="size-4" />}
+          label={email.subject || "(no subject)"}
+          meta={`${email.from}${contextDate(email.date) ? ` · ${contextDate(email.date)}` : ""}`}
+          details={email.snippet}
+          onOpen={() => onOpenEmail(contextEmailToAgentEmail(email))}
+          iconClassName="bg-sky-500/15 text-sky-700 dark:text-sky-400"
+        />
+      ))}
+      {documents.map((document) => (
+        <AgentContextCard
+          key={`document:${document.id}`}
+          icon={<FileTextIcon className="size-4" />}
+          label={document.title || "Untitled document"}
+          meta={contextDate(document.updatedAt, "Document")}
+          details={document.preview}
+          onOpen={() => onOpenDocument(document.id)}
+          iconClassName="bg-amber-500/15 text-amber-700 dark:text-amber-400"
+        />
+      ))}
+    </div>
+  )
+}
+
+function contextEventToAgentEvent(event: AgentContextEvent): AgentEvent {
+  return {
+    id: event.id,
+    title: event.title,
+    start: event.start,
+    end: event.end,
+    allDay: event.allDay ?? false,
+    location: event.location ?? null,
+    description: null,
+    color: event.color ?? null,
+    recurringEventId: null,
+    originalStart: null,
+  }
+}
+
+function contextEmailToAgentEmail(email: AgentContextEmail): AgentEmail {
+  return {
+    id: email.id,
+    threadId: email.threadId,
+    from: email.from,
+    fromEmail: "",
+    subject: email.subject,
+    snippet: email.snippet,
+    date: email.date,
+    unread: false,
+    important: false,
+    starred: false,
+    category: null,
+  }
+}
+
+function contextDate(value: string, fallback = ""): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return fallback
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+  }).format(date)
 }
 
 function SelectedTextContextChip({

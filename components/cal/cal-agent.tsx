@@ -16,6 +16,7 @@ import {
   CheckIcon,
   ClockIcon,
   CopyIcon,
+  FileTextIcon,
   LayersIcon,
   ListIcon,
   type LucideIcon,
@@ -82,6 +83,14 @@ import type {
   CalendarViewData,
   FreeSlot,
 } from "@/lib/cal-agent/tools"
+import {
+  agentContextMetadata,
+  type AgentContextEmail,
+  type AgentContextDocument,
+  type AgentContextEvent,
+  type AgentContextItem,
+  type AgentContextMetadata,
+} from "@/lib/agent-context"
 import { cn } from "@/lib/utils"
 
 /** Output shapes of the tools. */
@@ -117,26 +126,10 @@ type EmailListOutput = {
 }
 
 /** A calendar event attached to a message as context (dragged onto the panel). */
-export type ContextEvent = {
-  id: string
-  title: string
-  start: string
-  end: string
-  allDay?: boolean
-  location?: string
-  color?: string
-}
+export type ContextEvent = AgentContextEvent
 
 /** A lightweight, serializable email attached to a message as context. */
-export type ContextEmail = {
-  id: string
-  threadId: string
-  from: string
-  subject: string
-  /** ISO datetime. */
-  date: string
-  snippet: string
-}
+export type ContextEmail = AgentContextEmail
 
 /** Widen a context email back to the agent email shape for opening it. */
 function contextEmailToAgentEmail(email: ContextEmail): AgentEmail {
@@ -335,17 +328,33 @@ export function CalAgent({
   // Send a message, attaching any pending event context as metadata (rendered
   // above the user bubble and injected into the model prompt server-side).
   const handleSend = useCallback(
-    (text: string) => {
-      const metadata:
-        | { contextEvents?: ContextEvent[]; contextEmails?: ContextEmail[] }
-        | undefined =
-        contextEvents.length || contextEmails.length
+    (text: string, contextItems: AgentContextItem[]) => {
+      const selected = agentContextMetadata(contextItems)
+      const selectedEvents = selected?.contextEvents ?? []
+      const selectedEmails = selected?.contextEmails ?? []
+      const mergedEvents = [
+        ...contextEvents,
+        ...selectedEvents.filter(
+          (event) => !contextEvents.some((current) => current.id === event.id)
+        ),
+      ]
+      const mergedEmails = [
+        ...contextEmails,
+        ...selectedEmails.filter(
+          (email) => !contextEmails.some((current) => current.id === email.id)
+        ),
+      ]
+      const metadata: AgentContextMetadata | undefined =
+        mergedEvents.length || mergedEmails.length || selected?.contextDocuments?.length
           ? {
-              ...(contextEvents.length ? { contextEvents } : {}),
-              ...(contextEmails.length ? { contextEmails } : {}),
+              ...(mergedEvents.length ? { contextEvents: mergedEvents } : {}),
+              ...(mergedEmails.length ? { contextEmails: mergedEmails } : {}),
+              ...(selected?.contextDocuments?.length
+                ? { contextDocuments: selected.contextDocuments }
+                : {}),
             }
           : undefined
-      sendMessage({ text, metadata })
+      sendMessage({ text: text || "Use the attached context.", metadata })
       onClearContextEvents?.()
       onClearContextEmails?.()
     },
@@ -633,6 +642,13 @@ export function CalAgent({
     [onOpenEvent, router]
   )
 
+  const handleOpenDocument = useCallback(
+    (document: AgentContextDocument) => {
+      router.push(`/documents/${encodeURIComponent(document.id)}`)
+    },
+    [router]
+  )
+
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col">
       <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3">
@@ -737,6 +753,7 @@ export function CalAgent({
                 isLast={mi === messages.length - 1}
                 onOpenEvent={handleOpenEvent}
                 onOpenEmail={onOpenEmail}
+                onOpenDocument={handleOpenDocument}
                 onPickSlot={(slot) =>
                   sendMessage({ text: formatSlotSelection(slot) })
                 }
@@ -836,6 +853,7 @@ function MessageView({
   isLast,
   onOpenEvent,
   onOpenEmail,
+  onOpenDocument,
   onPickSlot,
   onApprove,
   onReject,
@@ -846,6 +864,7 @@ function MessageView({
   isLast?: boolean
   onOpenEvent?: (event: AgentEvent) => void
   onOpenEmail?: (email: AgentEmail) => void
+  onOpenDocument?: (document: AgentContextDocument) => void
   onPickSlot?: (slot: FreeSlot) => void
   onApprove?: (approvalId: string) => void
   onReject?: (approvalId: string) => void
@@ -862,6 +881,10 @@ function MessageView({
     const contextEmails =
       (message.metadata as { contextEmails?: ContextEmail[] } | undefined)
         ?.contextEmails ?? []
+    const contextDocuments =
+      (message.metadata as
+        | { contextDocuments?: AgentContextDocument[] }
+        | undefined)?.contextDocuments ?? []
     return (
       <div className="flex flex-col items-end gap-1.5">
         {contextEvents.length > 0 && (
@@ -885,6 +908,21 @@ function MessageView({
                 onOpen={
                   onOpenEmail
                     ? () => onOpenEmail(contextEmailToAgentEmail(email))
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        )}
+        {contextDocuments.length > 0 && (
+          <div className="flex w-72 max-w-[85%] flex-col gap-1.5 pt-3">
+            {contextDocuments.map((document) => (
+              <ContextDocumentChip
+                key={document.id}
+                document={document}
+                onOpen={
+                  onOpenDocument
+                    ? () => onOpenDocument(document)
                     : undefined
                 }
               />
@@ -1504,6 +1542,29 @@ function ContextEmailChip({
       onRemove={onRemove}
       removeLabel="Remove attached email"
       iconClassName="bg-sky-500/15 text-sky-600 dark:text-sky-400"
+    />
+  )
+}
+
+function ContextDocumentChip({
+  document,
+  onOpen,
+}: {
+  document: AgentContextDocument
+  onOpen?: () => void
+}) {
+  const updated = new Date(document.updatedAt)
+  const meta = Number.isNaN(updated.getTime())
+    ? "Document"
+    : `Updated ${format(updated, "MMM d")}`
+  return (
+    <AgentContextCard
+      icon={<FileTextIcon className="size-4" />}
+      label={document.title || "Untitled document"}
+      meta={meta}
+      details={document.preview || undefined}
+      onOpen={onOpen}
+      iconClassName="bg-amber-500/15 text-amber-700 dark:text-amber-400"
     />
   )
 }

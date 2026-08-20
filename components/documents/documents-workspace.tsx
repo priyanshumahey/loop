@@ -141,6 +141,7 @@ export function DocumentsWorkspace({
   const [folderDialogOpen, setFolderDialogOpen] = useState(false)
   const [folderName, setFolderName] = useState("")
   const [folderToDelete, setFolderToDelete] = useState<DocumentFolder | null>(null)
+  const [documentToDelete, setDocumentToDelete] = useState<DocumentSummary | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [agentOpen, setAgentOpen] = useState(false)
@@ -255,11 +256,15 @@ export function DocumentsWorkspace({
     }
   }
 
-  const removeDocument = async (document: DocumentSummary) => {
+  const removeDocument = async () => {
+    const document = documentToDelete
+    if (!document) return
     setBusyId(document.id)
+    setError(null)
     try {
       await deleteDocument(document.id)
       setDocuments((current) => current.filter((item) => item.id !== document.id))
+      setDocumentToDelete(null)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Failed to delete document")
     } finally {
@@ -566,7 +571,7 @@ export function DocumentsWorkspace({
                         </button>
                         <button
                           type="button"
-                          onClick={() => void removeDocument(document)}
+                          onClick={() => setDocumentToDelete(document)}
                           disabled={busyId === document.id}
                           aria-label="Delete document"
                           className="grid size-7 place-items-center rounded-control text-ink-3 opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 focus:opacity-100"
@@ -585,7 +590,7 @@ export function DocumentsWorkspace({
                       <button type="button" onClick={() => router.push(`/documents/${document.id}`)} className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-ink">{document.title}</button>
                       <span className="hidden text-[11px] text-ink-3 sm:block">{new Date(document.updatedAt).toLocaleDateString()}</span>
                       <button type="button" onClick={() => void toggleStar(document)} aria-label="Toggle star" className="grid size-7 place-items-center rounded-control text-ink-3 hover:bg-hover"><StarIcon className={cn("size-3.5", document.starred && "fill-current text-orange")} /></button>
-                      <button type="button" onClick={() => void removeDocument(document)} aria-label="Delete document" className="grid size-7 place-items-center rounded-control text-ink-3 hover:bg-destructive/10 hover:text-destructive"><Trash2Icon className="size-3.5" /></button>
+                      <button type="button" onClick={() => setDocumentToDelete(document)} aria-label="Delete document" className="grid size-7 place-items-center rounded-control text-ink-3 hover:bg-destructive/10 hover:text-destructive"><Trash2Icon className="size-3.5" /></button>
                     </div>
                   ))}
                 </div>
@@ -641,6 +646,34 @@ export function DocumentsWorkspace({
           <DialogFooter>
             <Button variant="ghost" onClick={() => setFolderDialogOpen(false)}>Cancel</Button>
             <Button onClick={() => void addFolder()} disabled={!folderName.trim()}>Create folder</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={documentToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setDocumentToDelete(null)
+        }}
+      >
+        <DialogContent className="max-w-sm rounded-window">
+          <DialogHeader>
+            <DialogTitle>Delete {documentToDelete?.title}?</DialogTitle>
+            <DialogDescription>
+              This document will be permanently deleted. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDocumentToDelete(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void removeDocument()}
+              disabled={busyId === documentToDelete?.id}
+            >
+              Delete document
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

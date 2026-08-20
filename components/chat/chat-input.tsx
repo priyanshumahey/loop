@@ -4,6 +4,7 @@ import { useCallback, useState } from "react"
 
 import { PromptBar } from "@/components/agent"
 import { LoopMark } from "@/components/loop-logo"
+import type { AgentContextItem } from "@/lib/agent-context"
 
 export function ChatInput({
   isStreaming,
@@ -11,17 +12,19 @@ export function ChatInput({
   onStop,
 }: {
   isStreaming: boolean
-  onSend: (text: string) => void
+  onSend: (text: string, contextItems: AgentContextItem[]) => void
   onStop: () => void
 }) {
   const [value, setValue] = useState("")
+  const [contextItems, setContextItems] = useState<AgentContextItem[]>([])
 
-  const submit = useCallback(() => {
-    const text = value.trim()
-    if (!text || isStreaming) return
-    onSend(text)
+  const submit = useCallback((submittedValue: string) => {
+    const text = submittedValue.trim()
+    if ((!text && contextItems.length === 0) || isStreaming) return
+    onSend(text, contextItems)
     setValue("")
-  }, [value, isStreaming, onSend])
+    setContextItems([])
+  }, [contextItems, isStreaming, onSend])
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 pb-5 pt-2">
@@ -32,6 +35,8 @@ export function ChatInput({
         isStreaming={isStreaming}
         onStop={onStop}
         showModelSelector={false}
+        contextItems={contextItems}
+        onContextItemsChange={setContextItems}
         footerLeading={
           <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-border/70 px-2.5 text-xs font-medium text-muted-foreground">
             <LoopMark className="h-3.5 w-3" />

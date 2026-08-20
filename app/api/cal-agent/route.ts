@@ -13,6 +13,7 @@ import {
   setActiveStream,
 } from "@/lib/cal-agent/resumable"
 import { APPROVAL_TOOLS, buildCalendarTools } from "@/lib/cal-agent/tools"
+import type { AgentContextMetadata } from "@/lib/agent-context"
 import { persistConversationServer } from "@/lib/db/agent-conversations-server"
 import {
   buildDocumentTools,
@@ -89,29 +90,11 @@ function surfaceContext(surface?: "home" | "calendar" | "mail"): string {
 function withEventContext(messages: UIMessage[]): UIMessage[] {
   return messages.map((message) => {
     if (message.role !== "user") return message
-    const meta = message.metadata as
-      | {
-          contextEvents?: {
-            id: string
-            title: string
-            start: string
-            end: string
-            allDay?: boolean
-            location?: string
-          }[]
-          contextEmails?: {
-            id: string
-            threadId: string
-            from: string
-            subject: string
-            date: string
-            snippet: string
-          }[]
-        }
-      | undefined
+    const meta = message.metadata as AgentContextMetadata | undefined
 
     const events = meta?.contextEvents
     const emails = meta?.contextEmails
+    const documents = meta?.contextDocuments
     const extraParts: { type: "text"; text: string }[] = []
 
     if (events?.length) {
@@ -142,6 +125,21 @@ function withEventContext(messages: UIMessage[]): UIMessage[] {
           `The user attached the following email${emails.length > 1 ? "s" : ""} as context for this message. ` +
           `Call readEmail with the emailId (or readThread with the threadId) to get the full contents before answering questions about it. ` +
           `Do NOT ask the user to paste the email — you already have its id:\n` +
+          lines.join("\n"),
+      })
+    }
+
+    if (documents?.length) {
+      const lines = documents.map(
+        (document) =>
+          `- "${document.title}" (documentId: ${document.id}), updated ${document.updatedAt}. Preview: ${document.preview || "No preview available."}`
+      )
+      extraParts.push({
+        type: "text",
+        text:
+          `The user attached the following document${documents.length > 1 ? "s" : ""} as context for this message. ` +
+          `Call readUserDocument with the documentId to get the full current contents before answering questions about it. ` +
+          `Do NOT ask the user to paste the document — you already have its id:\n` +
           lines.join("\n"),
       })
     }
