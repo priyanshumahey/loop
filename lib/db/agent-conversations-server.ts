@@ -3,6 +3,7 @@ import "server-only"
 import type { UIMessage } from "ai"
 
 import type { createClient } from "@/lib/supabase/server"
+import type { AgentConversationScope } from "@/lib/db/agent-conversations"
 
 type ServerSupabase = Awaited<ReturnType<typeof createClient>>
 
@@ -30,7 +31,12 @@ function deriveTitle(messages: UIMessage[]): string {
  */
 export async function persistConversationServer(
   supabase: ServerSupabase,
-  input: { id: string; messages: UIMessage[] },
+  input: {
+    id: string
+    messages: UIMessage[]
+    scope?: AgentConversationScope
+    documentId?: string | null
+  },
 ): Promise<void> {
   if (input.messages.length === 0) return
 
@@ -47,6 +53,8 @@ export async function persistConversationServer(
       id: input.id,
       title: deriveTitle(input.messages),
       messages: input.messages,
+      scope: input.scope ?? "calendar",
+      document_id: input.documentId ?? null,
     })
   }
 }

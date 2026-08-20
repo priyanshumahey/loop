@@ -46,7 +46,7 @@ function toCalendarEvent(event: AgentEvent): CalendarEvent {
   }
 }
 
-interface WriteInput {
+export interface WriteInput {
   eventTitle?: string
   title?: string
   start?: string
@@ -59,7 +59,7 @@ interface WriteInput {
   recurrenceScope?: RecurrenceScope
 }
 
-interface WriteOutput {
+export interface WriteOutput {
   ok: boolean
   event?: AgentEvent
   error?: string

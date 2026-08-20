@@ -8,6 +8,8 @@ import { createClient } from "@/lib/supabase/client"
 const TABLE = "agent_conversations"
 const LIMIT = 40
 
+export type AgentConversationScope = "calendar" | "documents" | "document"
+
 interface ConversationRow {
   id: string
   title: string
@@ -28,13 +30,21 @@ function rowToConversation(row: ConversationRow): AgentConversation {
 
 /** Fetch the current user's conversations (most recent first). Empty when the
  * user isn't authenticated — RLS simply returns no rows. */
-export async function listConversations(): Promise<AgentConversation[]> {
+export async function listConversations(options: {
+  scope?: AgentConversationScope
+  documentId?: string | null
+} = {}): Promise<AgentConversation[]> {
   const supabase = createClient()
-  const { data, error } = await supabase
+  let query = supabase
     .from(TABLE)
     .select("id, title, messages, created_at, updated_at")
+    .eq("scope", options.scope ?? "calendar")
     .order("updated_at", { ascending: false })
     .limit(LIMIT)
+  query = options.documentId
+    ? query.eq("document_id", options.documentId)
+    : query.is("document_id", null)
+  const { data, error } = await query
   if (error || !data) return []
   return (data as ConversationRow[]).map(rowToConversation)
 }
@@ -44,12 +54,16 @@ export async function upsertConversation(input: {
   id: string
   title: string
   messages: UIMessage[]
+  scope?: AgentConversationScope
+  documentId?: string | null
 }): Promise<void> {
   const supabase = createClient()
   await supabase.from(TABLE).upsert({
     id: input.id,
     title: input.title,
     messages: input.messages,
+    scope: input.scope ?? "calendar",
+    document_id: input.documentId ?? null,
     updated_at: new Date().toISOString(),
   })
 }

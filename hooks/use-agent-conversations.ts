@@ -4,6 +4,7 @@ import type { UIMessage } from "ai"
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import {
+  type AgentConversationScope,
   deleteConversationDb,
   listConversations,
   renameConversationDb,
@@ -15,6 +16,24 @@ const ACTIVE_KEY = "loop:agent:active"
 const OPEN_KEY = "loop:agent:open"
 const FAV_KEY = "loop:agent:favorites"
 const MAX_CONVERSATIONS = 40
+
+function storageKeys(scope: AgentConversationScope, documentId?: string | null) {
+  if (scope === "calendar" && !documentId) {
+    return {
+      conversations: CONV_KEY,
+      active: ACTIVE_KEY,
+      open: OPEN_KEY,
+      favorites: FAV_KEY,
+    }
+  }
+  const namespace = `loop:agent:${scope}:${documentId ?? "root"}`
+  return {
+    conversations: `${namespace}:conversations`,
+    active: `${namespace}:active`,
+    open: `${namespace}:open`,
+    favorites: `${namespace}:favorites`,
+  }
+}
 
 export interface AgentConversation {
   id: string
@@ -43,6 +62,81 @@ function deriveTitle(messages: UIMessage[]): string {
   return text.length > 48 ? `${text.slice(0, 48)}…` : text
 }
 
+type ConversationStorageKeys = ReturnType<typeof storageKeys>
+
+function readStoredArray<T>(key: string): T[] {
+  try {
+    const raw = localStorage.getItem(key)
+    const parsed = raw ? JSON.parse(raw) : null
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function readStoredValue(key: string): string {
+  try {
+    return localStorage.getItem(key) ?? ""
+  } catch {
+    return ""
+  }
+}
+
+function restoreStoredState({
+  keys,
+  legacyKeys,
+  syncUrl,
+  initialChatId,
+}: {
+  keys: ConversationStorageKeys
+  legacyKeys: ConversationStorageKeys | null
+  syncUrl: boolean
+  initialChatId?: string
+}) {
+  const byId = new Map<string, AgentConversation>()
+  const current = readStoredArray<AgentConversation>(keys.conversations)
+  const legacy = legacyKeys
+    ? readStoredArray<AgentConversation>(legacyKeys.conversations)
+    : []
+  for (const conversation of [...legacy, ...current]) {
+    const existing = byId.get(conversation.id)
+    if (!existing || conversation.updatedAt >= existing.updatedAt) {
+      byId.set(conversation.id, conversation)
+    }
+  }
+  const conversations = [...byId.values()]
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, MAX_CONVERSATIONS)
+  const existingIds = new Set(conversations.map((conversation) => conversation.id))
+
+  const legacyOpen = legacyKeys
+    ? readStoredArray<string>(legacyKeys.open)
+    : []
+  let openIds = [
+    ...new Set([...readStoredArray<string>(keys.open), ...legacyOpen]),
+  ].filter((id) => existingIds.has(id))
+
+  const legacyFavorites = legacyKeys
+    ? readStoredArray<string>(legacyKeys.favorites)
+    : []
+  const favoriteIds = [
+    ...new Set([
+      ...readStoredArray<string>(keys.favorites),
+      ...legacyFavorites,
+    ]),
+  ].filter((id) => existingIds.has(id))
+
+  const active =
+    readStoredValue(keys.active) ||
+    (legacyKeys ? readStoredValue(legacyKeys.active) : "")
+  const activeId = (syncUrl && initialChatId) || active || uid()
+  if (existingIds.has(activeId) && !openIds.includes(activeId)) {
+    openIds = [...openIds, activeId]
+  }
+
+  return { conversations, openIds, favoriteIds, activeId }
+}
+
 /**
  * localStorage-backed store for the calendar agent's conversations, synced to
  * Supabase. localStorage is an instant cache; the `agent_conversations` table
@@ -59,9 +153,30 @@ function deriveTitle(messages: UIMessage[]): string {
  * new browser tab) restores that conversation.
  */
 export function useAgentConversations(
-  options: { syncUrl?: boolean; initialChatId?: string } = {}
+  options: {
+    syncUrl?: boolean
+    initialChatId?: string
+    scope?: AgentConversationScope
+    documentId?: string | null
+    migrateFromScope?: AgentConversationScope
+  } = {}
 ) {
-  const { syncUrl = false, initialChatId } = options
+  const {
+    syncUrl = false,
+    initialChatId,
+    scope = "calendar",
+    documentId = null,
+    migrateFromScope,
+  } = options
+  const keys = useMemo(
+    () => storageKeys(scope, documentId),
+    [documentId, scope]
+  )
+  const legacyKeys = useMemo(
+    () =>
+      migrateFromScope ? storageKeys(migrateFromScope, null) : null,
+    [migrateFromScope]
+  )
   const [conversations, setConversations] = useState<AgentConversation[]>([])
   const [activeId, setActiveId] = useState<string>("")
   /** Conversations currently open as tabs, in tab order. */
@@ -72,68 +187,60 @@ export function useAgentConversations(
 
   // Restore from storage on mount.
   useEffect(() => {
-    let convs: AgentConversation[] = []
-    try {
-      const raw = localStorage.getItem(CONV_KEY)
-      const parsed = raw ? JSON.parse(raw) : null
-      if (Array.isArray(parsed)) convs = parsed
-    } catch {
-      // ignore
-    }
-    setConversations(convs)
-
-    const existing = new Set(convs.map((c) => c.id))
-    let open: string[] = []
-    try {
-      const raw = localStorage.getItem(OPEN_KEY)
-      const parsed = raw ? JSON.parse(raw) : null
-      if (Array.isArray(parsed)) open = parsed.filter((id) => existing.has(id))
-    } catch {
-      // ignore
-    }
-
-    let active = ""
-    try {
-      active = localStorage.getItem(ACTIVE_KEY) ?? ""
-    } catch {
-      // ignore
-    }
-
-    let favorites: string[] = []
-    try {
-      const raw = localStorage.getItem(FAV_KEY)
-      const parsed = raw ? JSON.parse(raw) : null
-      if (Array.isArray(parsed)) favorites = parsed.filter((id) => existing.has(id))
-    } catch {
-      // ignore
-    }
-    setFavoriteIds(favorites)
-
-    // Prefer an id from the URL (e.g. a shared or opened-in-new-tab chat link),
-    // then fall back to the stored active id even when it's an unsaved draft, so
-    // the conversation id stays stable across a refresh — otherwise an in-flight
-    // stream can't be resumed (its id would change on every reload).
-    const restoredActive = (syncUrl && initialChatId) || active || uid()
-    if (existing.has(restoredActive) && !open.includes(restoredActive)) {
-      open = [...open, restoredActive]
-    }
-    setOpenIds(open)
-    setActiveId(restoredActive)
-    setHydrated(true)
-
-    // Reconcile with Supabase (source of truth) in the background. Merge so
-    // conversations created locally aren't lost, and migrate any local-only
-    // ones up to the server.
     let cancelled = false
-    void (async () => {
-      const remote = await listConversations()
+    void Promise.resolve().then(async () => {
+      const stored = restoreStoredState({
+        keys,
+        legacyKeys,
+        syncUrl,
+        initialChatId,
+      })
       if (cancelled) return
+      setConversations(stored.conversations)
+      setOpenIds(stored.openIds)
+      setFavoriteIds(stored.favoriteIds)
+      setActiveId(stored.activeId)
+      setHydrated(true)
+
+      // Reconcile with Supabase (source of truth) in the background. Merge so
+      // conversations created locally aren't lost, and migrate any local-only
+      // ones up to the server.
+      const [currentRemote, legacyRemote] = await Promise.all([
+        listConversations({ scope, documentId }),
+        migrateFromScope
+          ? listConversations({ scope: migrateFromScope, documentId: null })
+          : Promise.resolve([]),
+      ])
+      if (cancelled) return
+      for (const conversation of legacyRemote) {
+        void upsertConversation({
+          id: conversation.id,
+          title: conversation.title,
+          messages: conversation.messages,
+          scope,
+          documentId,
+        })
+      }
+      const remoteById = new Map<string, AgentConversation>()
+      for (const conversation of [...legacyRemote, ...currentRemote]) {
+        const current = remoteById.get(conversation.id)
+        if (!current || conversation.updatedAt > current.updatedAt) {
+          remoteById.set(conversation.id, conversation)
+        }
+      }
+      const remote = [...remoteById.values()]
       const remoteIds = new Set(remote.map((c) => c.id))
-      const localOnly = convs.filter(
+      const localOnly = stored.conversations.filter(
         (c) => !remoteIds.has(c.id) && c.messages.length > 0
       )
       for (const c of localOnly) {
-        void upsertConversation({ id: c.id, title: c.title, messages: c.messages })
+        void upsertConversation({
+          id: c.id,
+          title: c.title,
+          messages: c.messages,
+          scope,
+          documentId,
+        })
       }
       if (remote.length === 0 && localOnly.length === 0) return
       setConversations((prev) => {
@@ -148,47 +255,47 @@ export function useAgentConversations(
           .sort((a, b) => b.updatedAt - a.updatedAt)
           .slice(0, MAX_CONVERSATIONS)
       })
-    })()
+    })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [documentId, initialChatId, keys, legacyKeys, migrateFromScope, scope, syncUrl])
 
   useEffect(() => {
     if (!hydrated) return
     try {
-      localStorage.setItem(CONV_KEY, JSON.stringify(conversations))
+      localStorage.setItem(keys.conversations, JSON.stringify(conversations))
     } catch {
       // ignore (quota / unavailable)
     }
-  }, [conversations, hydrated])
+  }, [conversations, hydrated, keys.conversations])
 
   useEffect(() => {
     if (!hydrated) return
     try {
-      localStorage.setItem(OPEN_KEY, JSON.stringify(openIds))
+      localStorage.setItem(keys.open, JSON.stringify(openIds))
     } catch {
       // ignore
     }
-  }, [openIds, hydrated])
+  }, [openIds, hydrated, keys.open])
 
   useEffect(() => {
     if (!hydrated) return
     try {
-      localStorage.setItem(FAV_KEY, JSON.stringify(favoriteIds))
+      localStorage.setItem(keys.favorites, JSON.stringify(favoriteIds))
     } catch {
       // ignore
     }
-  }, [favoriteIds, hydrated])
+  }, [favoriteIds, hydrated, keys.favorites])
 
   useEffect(() => {
     if (!hydrated || !activeId) return
     try {
-      localStorage.setItem(ACTIVE_KEY, activeId)
+      localStorage.setItem(keys.active, activeId)
     } catch {
       // ignore
     }
-  }, [activeId, hydrated])
+  }, [activeId, hydrated, keys.active])
 
   // Mirror the active conversation to the URL so each chat has its own address.
   useEffect(() => {
@@ -290,9 +397,15 @@ export function useAgentConversations(
       // A newly-saved draft becomes an open tab.
       setOpenIds((prev) => (prev.includes(activeId) ? prev : [...prev, activeId]))
       // Mirror to Supabase (source of truth).
-      void upsertConversation({ id: activeId, title, messages })
+      void upsertConversation({
+        id: activeId,
+        title,
+        messages,
+        scope,
+        documentId,
+      })
     },
-    [activeId, conversations]
+    [activeId, conversations, documentId, scope]
   )
 
   return {
