@@ -1,9 +1,9 @@
 "use client"
 
-import { SparklesIcon } from "lucide-react"
 import { useCallback, useState } from "react"
 
 import { PromptBar } from "@/components/agent"
+import { LoopMark } from "@/components/loop-logo"
 
 export function ChatInput({
   isStreaming,
@@ -31,9 +31,10 @@ export function ChatInput({
         onSubmit={submit}
         isStreaming={isStreaming}
         onStop={onStop}
+        showModelSelector={false}
         footerLeading={
           <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-border/70 px-2.5 text-xs font-medium text-muted-foreground">
-            <SparklesIcon className="size-3" />
+            <LoopMark className="h-3.5 w-3" />
             Loop
           </span>
         }

@@ -1,6 +1,12 @@
 "use client"
 
-import { ChevronDownIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react"
+import {
+  ChevronDownIcon,
+  MessagesSquareIcon,
+  PlusIcon,
+  Trash2Icon,
+  XIcon,
+} from "lucide-react"
 import { useState } from "react"
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -37,25 +43,29 @@ export function AgentTabs({
 
   const openIds = new Set(openConversations.map((c) => c.id))
   const recent = [...conversations].sort((a, b) => b.updatedAt - a.updatedAt)
+  const activeConversation = conversations.find((c) => c.id === activeId)
+  const mobileTitle = isDraft
+    ? "New conversation"
+    : activeConversation?.title ?? "Conversations"
 
   return (
-    <div className="flex shrink-0 items-center gap-1 border-b border-line bg-inset/50 px-2 py-1">
-      {/* Scrollable open tabs */}
-      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <button
-          type="button"
-          onClick={onNewChat}
-          className={cn(
-            "inline-flex h-7 shrink-0 items-center gap-1 rounded-control px-2 text-xs transition-colors",
-            isDraft
-              ? "bg-surface text-ink"
-              : "text-ink-3 hover:bg-hover hover:text-ink"
-          )}
-        >
-          <PlusIcon className="size-3.5" />
-          New chat
-        </button>
+    <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-line bg-inset/50 px-2 sm:h-auto sm:gap-1 sm:py-1">
+      <button
+        type="button"
+        onClick={onNewChat}
+        aria-label="New chat"
+        title="New chat"
+        className={cn(
+          "grid size-8 shrink-0 place-items-center rounded-control text-ink-3 transition-colors hover:bg-hover hover:text-ink sm:inline-flex sm:h-7 sm:w-auto sm:gap-1 sm:px-2 sm:text-xs",
+          isDraft && "bg-surface text-ink shadow-btn"
+        )}
+      >
+        <PlusIcon className="size-3.5" />
+        <span className="hidden sm:inline">New chat</span>
+      </button>
 
+      {/* Desktop open tabs. Mobile uses the conversation selector below. */}
+      <div className="hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] sm:flex [&::-webkit-scrollbar]:hidden">
         {openConversations.map((conv) => (
           <div
             key={conv.id}
@@ -86,7 +96,7 @@ export function AgentTabs({
         ))}
       </div>
 
-      {/* History popover — outside the scroll area so it never clips */}
+      {/* On mobile this is the active conversation selector; on desktop, History. */}
       <Popover
         open={historyOpen}
         onOpenChange={(open) => {
@@ -97,19 +107,30 @@ export function AgentTabs({
         <PopoverTrigger asChild>
           <button
             type="button"
+            aria-label="Conversation history"
             className={cn(
-              "inline-flex h-7 shrink-0 items-center gap-1 rounded-control px-2 text-xs transition-colors",
-              "text-ink-3 hover:bg-hover hover:text-ink",
+              "flex h-8 min-w-0 flex-1 items-center gap-2 rounded-control bg-surface px-2.5 text-xs text-ink shadow-btn transition-colors hover:bg-hover sm:h-7 sm:flex-none sm:bg-transparent sm:px-2 sm:text-ink-3 sm:shadow-none sm:hover:text-ink",
               historyOpen && "bg-surface text-ink"
             )}
           >
-            History
+            <span className="flex min-w-0 flex-1 items-center gap-1.5 sm:hidden">
+              <MessagesSquareIcon className="size-3.5 shrink-0 text-ink-3" />
+              <span className="truncate">{mobileTitle}</span>
+            </span>
+            <span className="hidden sm:inline">History</span>
             <ChevronDownIcon
-              className={cn("size-3 transition-transform", historyOpen && "rotate-180")}
+              className={cn(
+                "size-3 shrink-0 transition-transform",
+                historyOpen && "rotate-180"
+              )}
             />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="end" sideOffset={6} className="w-64 p-0">
+        <PopoverContent
+          align="end"
+          sideOffset={6}
+          className="w-[min(20rem,calc(100vw-1rem))] p-0 sm:w-64"
+        >
           <div className="bg-inset px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-ink-3">
             Recent conversations
           </div>
@@ -127,7 +148,11 @@ export function AgentTabs({
                     key={conv.id}
                     className={cn(
                       "group flex items-center gap-1 rounded-control px-2 py-1.5 text-xs hover:bg-hover",
-                      openIds.has(conv.id) ? "text-ink" : "text-ink-3"
+                      activeId === conv.id
+                        ? "bg-inset text-ink"
+                        : openIds.has(conv.id)
+                          ? "text-ink"
+                          : "text-ink-3"
                     )}
                   >
                     <button
@@ -166,7 +191,7 @@ export function AgentTabs({
                         type="button"
                         aria-label="Delete conversation"
                         onClick={() => setConfirmDeleteId(conv.id)}
-                        className="shrink-0 rounded p-1 text-muted-foreground/70 opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                        className="shrink-0 rounded p-1 text-muted-foreground/70 transition-opacity hover:text-destructive sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"
                       >
                         <Trash2Icon className="size-3.5" />
                       </button>

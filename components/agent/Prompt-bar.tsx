@@ -151,6 +151,7 @@ type PromptBarProps = {
   isStreaming?: boolean;
   onStop?: () => void;
   footerLeading?: ReactNode;
+  showModelSelector?: boolean;
 };
 
 export default function PromptBar({
@@ -161,6 +162,7 @@ export default function PromptBar({
   isStreaming = false,
   onStop,
   footerLeading,
+  showModelSelector = true,
 }: PromptBarProps) {
   const pill = variant === "Pill";
   const controlled = value !== undefined;
@@ -344,10 +346,11 @@ export default function PromptBar({
     const controls = controlsRef.current;
     const measure = measureRef.current;
     const modelButton = modelRef.current;
-    if (!input || !controls || !measure || !modelButton) return;
+    if (!input || !controls || !measure) return;
 
-    const fixedControlsWidth = 28 * 3 + modelButton.offsetWidth;
-    const inlineGaps = 4 * 4;
+    const fixedControlsWidth =
+      28 * 3 + (showModelSelector ? modelButton?.offsetWidth ?? 0 : 0);
+    const inlineGaps = showModelSelector ? 4 * 4 : 4 * 3;
     const inlineInputWidth = controls.clientWidth - fixedControlsWidth - inlineGaps;
     const needsFullWidth = draft.includes("\n") || measure.offsetWidth + 8 > inlineInputWidth;
     if (needsFullWidth !== expanded) {
@@ -360,7 +363,7 @@ export default function PromptBar({
     const contentHeight = input.scrollHeight;
     input.style.height = `${Math.min(Math.max(contentHeight, minHeight), maxHeight)}px`;
     input.style.overflowY = contentHeight > maxHeight ? "auto" : "hidden";
-  }, [draft, expanded]);
+  }, [draft, expanded, showModelSelector]);
 
   const closeMenus = () => {
     setPlusOpen(false);
@@ -483,7 +486,7 @@ export default function PromptBar({
       )}
 
       {/* ── model menu ─────────────────────────────────── */}
-      {modelOpen && (
+      {showModelSelector && modelOpen && (
         <div
           onMouseLeave={() => setModelHovered(null)}
           className="absolute right-0 bottom-full z-10 mb-2 w-44 rounded-[10px] bg-surface p-1 shadow-raised"
@@ -580,8 +583,12 @@ export default function PromptBar({
           ref={controlsRef}
           className={`grid items-end gap-x-1 gap-y-1.5 ${
             expanded
-              ? "grid-cols-[minmax(0,1fr)_auto_28px_28px]"
-              : "grid-cols-[28px_minmax(0,1fr)_auto_28px_28px]"
+              ? showModelSelector
+                ? "grid-cols-[minmax(0,1fr)_auto_28px_28px]"
+                : "grid-cols-[minmax(0,1fr)_28px_28px]"
+              : showModelSelector
+                ? "grid-cols-[28px_minmax(0,1fr)_auto_28px_28px]"
+                : "grid-cols-[28px_minmax(0,1fr)_28px_28px]"
           }`}
         >
           <button
@@ -646,26 +653,28 @@ export default function PromptBar({
           />
 
           {/* model picker */}
-          <button
-            ref={modelRef}
-            type="button"
-            aria-expanded={modelOpen}
-            aria-label="Choose model"
-            onClick={() => {
-              setPlusOpen(false);
-              const nextOpen = !modelOpen;
-              setModelOpen(nextOpen);
-              if (!nextOpen) setModelHovered(null);
-            }}
-            className={`flex h-7 shrink-0 items-center gap-1 px-1.5 text-[12px] font-medium text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink ${
-              pill ? "rounded-full" : "rounded-[8px]"
-            } ${expanded ? "col-start-2 row-start-2" : "col-start-3 row-start-1"}`}
-          >
-            {model.name}
-            <span className="text-ink-3">
-              <Icon size={11} strokeWidth={2.4}><path d="M6 9l6 6 6-6" /></Icon>
-            </span>
-          </button>
+          {showModelSelector && (
+            <button
+              ref={modelRef}
+              type="button"
+              aria-expanded={modelOpen}
+              aria-label="Choose model"
+              onClick={() => {
+                setPlusOpen(false);
+                const nextOpen = !modelOpen;
+                setModelOpen(nextOpen);
+                if (!nextOpen) setModelHovered(null);
+              }}
+              className={`flex h-7 shrink-0 items-center gap-1 px-1.5 text-[12px] font-medium text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink ${
+                pill ? "rounded-full" : "rounded-[8px]"
+              } ${expanded ? "col-start-2 row-start-2" : "col-start-3 row-start-1"}`}
+            >
+              {model.name}
+              <span className="text-ink-3">
+                <Icon size={11} strokeWidth={2.4}><path d="M6 9l6 6 6-6" /></Icon>
+              </span>
+            </button>
+          )}
 
           {/* dictation */}
           <button
@@ -676,7 +685,13 @@ export default function PromptBar({
             className={`flex size-7 shrink-0 items-center justify-center transition-[background-color,color,transform] duration-150 active:scale-[0.94] ${
               pill ? "rounded-full" : "rounded-[8px]"
             } ${listening ? "bg-accent-tint text-accent-ink" : "text-ink-3 hover:bg-hover hover:text-ink"} ${
-              expanded ? "col-start-3 row-start-2" : "col-start-4 row-start-1"
+              expanded
+                ? showModelSelector
+                  ? "col-start-3 row-start-2"
+                  : "col-start-2 row-start-2"
+                : showModelSelector
+                  ? "col-start-4 row-start-1"
+                  : "col-start-3 row-start-1"
             }`}
           >
             {listening ? (
@@ -702,7 +717,15 @@ export default function PromptBar({
             onClick={send}
             className={`flex size-7 shrink-0 items-center justify-center transition-[background-color,color,transform] duration-200 enabled:active:scale-[0.94] ${
               pill ? "rounded-full" : "rounded-[8px]"
-            } ${expanded ? "col-start-4 row-start-2" : "col-start-5 row-start-1"}`}
+            } ${
+              expanded
+                ? showModelSelector
+                  ? "col-start-4 row-start-2"
+                  : "col-start-3 row-start-2"
+                : showModelSelector
+                  ? "col-start-5 row-start-1"
+                  : "col-start-4 row-start-1"
+            }`}
             style={{
               background: isStreaming || canSend ? "var(--ink)" : "var(--line-strong)",
               color: isStreaming || canSend ? "var(--surface)" : "var(--ink-2)",

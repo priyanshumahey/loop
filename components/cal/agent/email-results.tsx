@@ -317,7 +317,7 @@ export function EmailResults({
   error?: string
   onOpenEmail?: (email: AgentEmail) => void
 }) {
-  if (!connected && emails.length === 0) return <ConnectGoogle />
+  if (!connected && emails.length === 0) return <ConnectGoogle service="gmail" />
 
   const unreadCount = emails.filter((e) => e.unread).length
   const label = unreadOnly ? "unread email" : "email"
@@ -420,7 +420,7 @@ export function EmailDetailCard({
 }) {
   const [open, setOpen] = useState(false)
 
-  if (!connected) return <ConnectGoogle />
+  if (!connected) return <ConnectGoogle service="gmail" />
   if (error) {
     return (
       <AgentNotice
@@ -568,7 +568,9 @@ export function EmailThread({
     return unique.slice(0, 4)
   }, [messages])
 
-  if (!connected && messages.length === 0) return <ConnectGoogle />
+  if (!connected && messages.length === 0) {
+    return <ConnectGoogle service="gmail" />
+  }
   if (error) {
     return (
       <AgentNotice
