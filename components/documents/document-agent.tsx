@@ -654,7 +654,7 @@ function DocumentAgentSession(
         )}
       </div>
 
-      <div className="shrink-0 border-t border-line p-2">
+      <div className="shrink-0 p-2">
         {suggest &&
           suggest.id === messages.at(-1)?.id &&
           !streaming &&

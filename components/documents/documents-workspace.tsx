@@ -599,21 +599,6 @@ export function DocumentsWorkspace({
           </div>
           </div>
 
-          {agentOpen && (
-            <aside className="absolute inset-0 z-40 min-w-0 bg-surface sm:inset-y-0 sm:left-auto sm:w-[min(390px,50vw)] sm:border-l sm:border-line lg:relative lg:z-auto lg:w-[390px] lg:shrink-0">
-              <DocumentAgent
-                scope="calendar"
-                onMutated={() => void refreshAfterAgentMutation()}
-                onClose={() => setAgentOpen(false)}
-              />
-              {agentRefreshing && (
-                <div className="pointer-events-none absolute inset-x-3 top-14 z-10 rounded-control bg-inset px-3 py-2 text-center text-[11px] text-ink-3 shadow-card">
-                  Refreshing your library…
-                </div>
-              )}
-            </aside>
-          )}
-
           {!agentOpen && (
             <button
               type="button"
@@ -627,6 +612,23 @@ export function DocumentsWorkspace({
           )}
         </div>
       </main>
+
+      {agentOpen && (
+        <aside className="fixed inset-0 z-40 h-svh w-full p-2 sm:relative sm:inset-auto sm:z-auto sm:w-[min(390px,50vw)] sm:shrink-0 sm:pl-0 lg:w-[390px]">
+          <div className="relative flex h-full min-w-0 flex-col overflow-hidden rounded-window bg-surface shadow-card">
+            <DocumentAgent
+              scope="calendar"
+              onMutated={() => void refreshAfterAgentMutation()}
+              onClose={() => setAgentOpen(false)}
+            />
+            {agentRefreshing && (
+              <div className="pointer-events-none absolute inset-x-3 top-14 z-10 rounded-control bg-inset px-3 py-2 text-center text-[11px] text-ink-3 shadow-card">
+                Refreshing your library…
+              </div>
+            )}
+          </div>
+        </aside>
+      )}
 
       <Dialog open={folderDialogOpen} onOpenChange={setFolderDialogOpen}>
         <DialogContent className="max-w-sm rounded-window">

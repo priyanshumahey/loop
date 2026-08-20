@@ -96,9 +96,8 @@ function MailBriefing({ onAsk }: { onAsk: (text: string) => void }) {
 }
 
 /**
- * A resizable AI assistant panel docked to the right of the mail page, mirroring
- * the calendar copilot: same conversation store, tabs, resize rail, and collapse
- * behavior. Email results the agent returns open inline in the reader.
+ * A resizable AI assistant panel docked to the right of the mail page. Email
+ * results the agent returns open inline in the reader.
  */
 export function MailCopilotPanel({
   onOpenEmail,
@@ -113,23 +112,15 @@ export function MailCopilotPanel({
   onClearContextEmails?: () => void
 }) {
   const [width, setWidth] = useState(DEFAULT_WIDTH)
-  const [collapsed, setCollapsed] = usePersistentState(
-    'loop:copilot:collapsed',
-    false
-  )
+  const [agentOpen, setAgentOpen] = useState(true)
   const [mode, setMode] = usePersistentState<PanelMode>(
     'loop:mail:right-panel-mode',
     'assistant'
   )
   const [isDragging, setIsDragging] = useState(false)
-  const [mobileOpen, setMobileOpen] = useState(false)
   const store = useAgentConversations()
 
-  const toggle = useCallback(() => setCollapsed((c) => !c), [setCollapsed])
-
-  // Keep the panel open while there's an email waiting to attach, so clicking
-  // "Ask copilot" on the reader reveals the assistant automatically.
-  const showCollapsed = collapsed && contextEmails.length === 0
+  const panelOpen = agentOpen || contextEmails.length > 0
 
   // Attaching an email is an assistant action, so force the assistant view
   // whenever there are emails pending attachment.
@@ -137,71 +128,45 @@ export function MailCopilotPanel({
 
   useEffect(() => {
     if (contextEmails.length === 0) return
-    Promise.resolve().then(() => setMobileOpen(true))
+    Promise.resolve().then(() => setAgentOpen(true))
   }, [contextEmails.length])
 
   const { dragRef, handleMouseDown } = useSidebarResize({
     direction: 'left',
     currentWidth: width,
     onResize: setWidth,
-    onToggle: toggle,
-    isCollapsed: collapsed,
     minResizeWidth: MIN_WIDTH,
     maxResizeWidth: MAX_WIDTH,
+    enableAutoCollapse: false,
+    enableToggle: false,
+    isNested: true,
     setIsDraggingRail: setIsDragging,
     widthCookieName: 'loop_copilot_width',
   })
 
   const closePanel = useCallback(() => {
-    setMobileOpen(false)
-    setCollapsed(true)
-  }, [setCollapsed])
-
-  const RailIcon = mode === 'calendar' ? CalendarDaysIcon : LoopMark
-  const railLabel = mode === 'calendar' ? 'Calendar' : 'Ask agent'
+    setAgentOpen(false)
+  }, [])
 
   return (
     <>
-      {!mobileOpen && (
+      {!panelOpen && (
         <button
           type="button"
-          onClick={() => setMobileOpen(true)}
+          onClick={() => setAgentOpen(true)}
           aria-label="Open Loop assistant"
           title="Open Loop assistant"
-          className="fixed bottom-4 right-4 z-40 grid size-11 place-items-center rounded-full bg-ink text-canvas shadow-raised md:hidden"
+          className="fixed bottom-6 right-6 z-40 grid size-10 place-items-center rounded-full bg-ink text-canvas shadow-raised transition-transform hover:scale-[1.04]"
         >
           <LoopMark className="h-5 w-[17px]" />
         </button>
       )}
 
-      {showCollapsed && (
-      <div className="hidden h-svh shrink-0 py-2 pr-2 md:block">
-        <button
-          type="button"
-          onClick={() => setCollapsed(false)}
-          title={mode === 'calendar' ? 'Open calendar' : 'Open assistant'}
-          className="flex h-full w-11 flex-col items-center justify-between rounded-window bg-surface py-3 shadow-card transition-colors hover:bg-hover"
-        >
-          <RailIcon className="h-4 w-4 text-foreground" />
-          <span
-            className="text-[12px] font-medium tracking-wide text-muted-foreground"
-            style={{ writingMode: 'vertical-rl' }}
-          >
-            {railLabel}
-          </span>
-          <RailIcon className="h-4 w-4 text-transparent" />
-        </button>
-      </div>
-      )}
-
-      <div
+      {panelOpen && (
+      <aside
         className={cn(
-          'h-svh w-full p-2 md:w-[var(--panel-width)] md:shrink-0 md:py-2 md:pr-2 md:pl-0',
-          mobileOpen ? 'fixed inset-0 z-50 block' : 'hidden',
-          showCollapsed
-            ? 'md:hidden'
-            : 'md:relative md:inset-auto md:z-auto md:block',
-          !isDragging && 'md:transition-[width] md:duration-200 md:ease-linear'
+          'fixed inset-0 z-40 h-svh w-full p-2 md:relative md:inset-auto md:z-auto md:w-[min(390px,44vw)] md:shrink-0 md:pl-0 lg:w-[var(--panel-width)]',
+          !isDragging && 'lg:transition-[width] lg:duration-150 lg:ease-linear'
         )}
         style={{ '--panel-width': width } as CSSProperties}
       >
@@ -213,7 +178,7 @@ export function MailCopilotPanel({
           tabIndex={-1}
           onMouseDown={handleMouseDown}
           title="Resize assistant panel"
-          className="group/rail absolute inset-y-0 left-0 z-20 hidden w-4 -translate-x-1/2 cursor-w-resize after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] after:transition-colors hover:after:bg-border md:flex"
+          className="group/rail absolute inset-y-0 left-0 z-20 hidden w-4 -translate-x-1/2 cursor-col-resize after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] after:transition-colors hover:after:bg-border lg:block"
         />
 
         <div className="relative flex h-full w-full flex-col overflow-hidden rounded-window bg-surface shadow-card">
@@ -251,7 +216,8 @@ export function MailCopilotPanel({
             />
           )}
         </div>
-      </div>
+      </aside>
+      )}
     </>
   )
 }

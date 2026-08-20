@@ -132,60 +132,6 @@ export function DocumentWorkspace({
             onSelectionPrompt={sendSelectionPrompt}
           />
 
-          {agentOpen && (
-            <aside
-              className={cn(
-                "absolute inset-0 z-40 min-w-0 bg-surface sm:inset-y-0 sm:left-auto sm:w-[min(390px,44vw)] sm:border-l sm:border-line lg:relative lg:z-auto lg:w-[var(--agent-width)] lg:shrink-0",
-                !isResizingAgent &&
-                  "lg:transition-[width] lg:duration-150 lg:ease-linear"
-              )}
-              style={{ "--agent-width": agentWidth } as CSSProperties}
-            >
-              <button
-                ref={dragRef}
-                type="button"
-                aria-label="Resize Loop assistant"
-                title="Resize Loop assistant"
-                tabIndex={-1}
-                onMouseDown={handleMouseDown}
-                className="group/rail absolute inset-y-0 left-0 z-50 hidden w-4 -translate-x-1/2 cursor-col-resize after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] after:transition-colors hover:after:bg-line-strong lg:block"
-              />
-              <DocumentAgent
-                scope="document"
-                documentId={document.id}
-                pendingRequest={pendingAgentRequest}
-                onPendingRequestHandled={(id) =>
-                  setPendingAgentRequest((current) =>
-                    current?.id === id ? null : current
-                  )
-                }
-                onBeforeSend={async () => {
-                  await editorRef.current?.flush()
-                }}
-                executeEditorTool={async (tool) => {
-                  const editor = editorRef.current
-                  if (!editor) {
-                    return { ok: false, error: "The editor is not mounted." }
-                  }
-                  return editor.executeTool(tool)
-                }}
-                onEditorEditSettled={() =>
-                  editorRef.current?.clearAgentSelectionAnchor()
-                }
-                onMutated={(mutation) => void handleMutation(mutation)}
-                onClose={() => {
-                  editorRef.current?.clearAgentSelectionAnchor()
-                  setAgentOpen(false)
-                }}
-              />
-              {agentRefreshing && (
-                <div className="pointer-events-none absolute inset-x-3 top-14 z-10 rounded-control bg-inset px-3 py-2 text-center text-[11px] text-ink-3 shadow-card">
-                  Refreshing the edited document…
-                </div>
-              )}
-            </aside>
-          )}
-
           {!agentOpen && (
             <button
               type="button"
@@ -199,6 +145,62 @@ export function DocumentWorkspace({
           )}
         </div>
       </main>
+
+      {agentOpen && (
+        <aside
+          className={cn(
+            "fixed inset-0 z-40 h-svh w-full p-2 sm:relative sm:inset-auto sm:z-auto sm:w-[min(390px,44vw)] sm:shrink-0 sm:pl-0 lg:w-[var(--agent-width)]",
+            !isResizingAgent &&
+              "lg:transition-[width] lg:duration-150 lg:ease-linear"
+          )}
+          style={{ "--agent-width": agentWidth } as CSSProperties}
+        >
+          <button
+            ref={dragRef}
+            type="button"
+            aria-label="Resize Loop assistant"
+            title="Resize Loop assistant"
+            tabIndex={-1}
+            onMouseDown={handleMouseDown}
+            className="group/rail absolute inset-y-0 left-0 z-50 hidden w-4 -translate-x-1/2 cursor-col-resize after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] after:transition-colors hover:after:bg-line-strong lg:block"
+          />
+          <div className="relative flex h-full min-w-0 flex-col overflow-hidden rounded-window bg-surface shadow-card">
+            <DocumentAgent
+              scope="document"
+              documentId={document.id}
+              pendingRequest={pendingAgentRequest}
+              onPendingRequestHandled={(id) =>
+                setPendingAgentRequest((current) =>
+                  current?.id === id ? null : current
+                )
+              }
+              onBeforeSend={async () => {
+                await editorRef.current?.flush()
+              }}
+              executeEditorTool={async (tool) => {
+                const editor = editorRef.current
+                if (!editor) {
+                  return { ok: false, error: "The editor is not mounted." }
+                }
+                return editor.executeTool(tool)
+              }}
+              onEditorEditSettled={() =>
+                editorRef.current?.clearAgentSelectionAnchor()
+              }
+              onMutated={(mutation) => void handleMutation(mutation)}
+              onClose={() => {
+                editorRef.current?.clearAgentSelectionAnchor()
+                setAgentOpen(false)
+              }}
+            />
+            {agentRefreshing && (
+              <div className="pointer-events-none absolute inset-x-3 top-14 z-10 rounded-control bg-inset px-3 py-2 text-center text-[11px] text-ink-3 shadow-card">
+                Refreshing the edited document…
+              </div>
+            )}
+          </div>
+        </aside>
+      )}
     </div>
   )
 }
