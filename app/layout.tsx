@@ -19,7 +19,7 @@ const fontMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "Loop — your calendar, on autopilot",
+  title: "Loop - Productivity Harness",
   description:
     "Loop connects your Google account and keeps your day in sync so you can focus on the work that matters.",
 }
