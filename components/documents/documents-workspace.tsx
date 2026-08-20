@@ -142,6 +142,7 @@ export function DocumentsWorkspace({
   const [folderName, setFolderName] = useState("")
   const [folderToDelete, setFolderToDelete] = useState<DocumentFolder | null>(null)
   const [documentToDelete, setDocumentToDelete] = useState<DocumentSummary | null>(null)
+  const [templateToDelete, setTemplateToDelete] = useState<DocumentSummary | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [agentOpen, setAgentOpen] = useState(false)
@@ -204,12 +205,15 @@ export function DocumentsWorkspace({
     }
   }
 
-  const removeTemplate = async (template: DocumentSummary) => {
+  const removeTemplate = async () => {
+    const template = templateToDelete
+    if (!template) return
     setBusyId(template.id)
     setError(null)
     try {
       await deleteDocument(template.id)
       setTemplates((current) => current.filter((item) => item.id !== template.id))
+      setTemplateToDelete(null)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Failed to delete template")
     } finally {
@@ -495,7 +499,7 @@ export function DocumentsWorkspace({
                         </button>
                         <button
                           type="button"
-                          onClick={() => void removeTemplate(template)}
+                          onClick={() => setTemplateToDelete(template)}
                           disabled={busyId === template.id}
                           aria-label={`Delete template ${template.title}`}
                           className="grid size-6 place-items-center rounded-[6px] text-ink-3 transition-colors hover:bg-destructive/10 hover:text-destructive"
@@ -648,6 +652,34 @@ export function DocumentsWorkspace({
           <DialogFooter>
             <Button variant="ghost" onClick={() => setFolderDialogOpen(false)}>Cancel</Button>
             <Button onClick={() => void addFolder()} disabled={!folderName.trim()}>Create folder</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={templateToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setTemplateToDelete(null)
+        }}
+      >
+        <DialogContent className="max-w-sm rounded-window">
+          <DialogHeader>
+            <DialogTitle>Delete {templateToDelete?.title}?</DialogTitle>
+            <DialogDescription>
+              This template will be permanently deleted. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setTemplateToDelete(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void removeTemplate()}
+              disabled={busyId === templateToDelete?.id}
+            >
+              Delete template
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
