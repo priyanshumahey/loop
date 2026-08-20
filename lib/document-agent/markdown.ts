@@ -32,6 +32,12 @@ import { BaseLinkPlugin } from "@platejs/link"
 import { BaseListPlugin } from "@platejs/list"
 import { MarkdownPlugin, remarkMdx } from "@platejs/markdown"
 import { BaseEquationPlugin, BaseInlineEquationPlugin } from "@platejs/math"
+import {
+  BaseTableCellHeaderPlugin,
+  BaseTableCellPlugin,
+  BaseTablePlugin,
+  BaseTableRowPlugin,
+} from "@platejs/table"
 import type { Value } from "platejs"
 import { BaseParagraphPlugin, createSlateEditor } from "platejs"
 import remarkGfm from "remark-gfm"
@@ -69,6 +75,10 @@ function createMarkdownEditor() {
       BaseLinkPlugin,
       BaseEquationPlugin,
       BaseInlineEquationPlugin,
+      BaseTablePlugin,
+      BaseTableRowPlugin,
+      BaseTableCellPlugin,
+      BaseTableCellHeaderPlugin,
       MarkdownPlugin.configure({
         options: { remarkPlugins: [remarkGfm, remarkMdx, remarkMath] },
       }),

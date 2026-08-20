@@ -1,5 +1,6 @@
 "use client"
 
+import type { YHistoryEditor } from "@platejs/yjs"
 import { insertEmptyCodeBlock } from "@platejs/code-block"
 import { triggerFloatingLink } from "@platejs/link/react"
 import { ListStyleType, toggleList } from "@platejs/list"
@@ -27,12 +28,13 @@ import {
   SuperscriptIcon,
   Undo2Icon,
 } from "lucide-react"
-import { KEYS } from "platejs"
+import { KEYS, type Value } from "platejs"
 import { useEditorRef } from "platejs/react"
 import { useRef, useState, type ChangeEvent, type ComponentType } from "react"
 
 import type { LoopDocumentEditor } from "@/components/documents/document-editor-kit"
 import { SourceEmbedPicker } from "@/components/documents/source-embed-picker"
+import { TableControls } from "@/components/documents/table-controls"
 import {
   AutoformatToggle,
   LineNumberToggle,
@@ -58,6 +60,18 @@ const preserveSelection = (event: React.MouseEvent<HTMLButtonElement>) => {
   event.preventDefault()
 }
 
+function replaceDocumentValue(editor: LoopDocumentEditor, value: Value) {
+  const yjsEditor = editor as LoopDocumentEditor & YHistoryEditor
+  yjsEditor.flushLocalChanges()
+  yjsEditor.undoManager.stopCapturing()
+  try {
+    editor.tf.withNewBatch(() => editor.tf.setValue(value))
+    yjsEditor.flushLocalChanges()
+  } finally {
+    yjsEditor.undoManager.stopCapturing()
+  }
+}
+
 export function DocumentToolbar() {
   const editor = useEditorRef<LoopDocumentEditor>()
   const importInputRef = useRef<HTMLInputElement>(null)
@@ -68,7 +82,7 @@ export function DocumentToolbar() {
     event.target.value = ""
     if (!file) return
     const markdown = await file.text()
-    editor.tf.setValue(editor.api.markdown.deserialize(markdown))
+    replaceDocumentValue(editor, editor.api.markdown.deserialize(markdown))
     editor.tf.focus()
   }
 
@@ -181,6 +195,7 @@ export function DocumentToolbar() {
             <Link2Icon />
           </ToolbarButton>
           <SourceEmbedPicker />
+          <TableControls />
           <ToolbarButton onMouseDown={preserveSelection} onClick={() => { editor.tf.insertNodes({ type: KEYS.hr, children: [{ text: "" }] }); editor.tf.focus() }} aria-label="Horizontal rule" tooltip="Horizontal rule">
             <MinusIcon />
           </ToolbarButton>

@@ -1,10 +1,12 @@
 "use client"
 
+import type { YHistoryEditor } from "@platejs/yjs"
 import { YjsPlugin } from "@platejs/yjs/react"
 import {
   CheckIcon,
   ChevronLeftIcon,
   CircleAlertIcon,
+  RefreshCwIcon,
   ScissorsIcon,
   SparklesIcon,
   WandSparklesIcon,
@@ -14,6 +16,7 @@ import {
   KEYS,
   NodeApi,
   RangeApi,
+  type RangeRef,
   type TElement,
   type TRange,
   type Value,
@@ -43,6 +46,8 @@ import {
   createDocumentCheckpoint,
   updateDocument,
 } from "@/lib/api/documents"
+import { getEmail } from "@/lib/api/emails"
+import { getEvent } from "@/lib/api/events"
 import {
   cursorColorForUser,
   getCollaborationToken,
@@ -58,7 +63,13 @@ import {
   embedNodeText,
   EMAIL_EMBED_KEY,
   EVENT_EMBED_KEY,
+  insertSourceEmbed,
+  isEmailEmbedElement,
+  isEventEmbedElement,
   projectEmbedsForMarkdown,
+  toEmailEmbedSnapshot,
+  toEventEmbedSnapshot,
+  type TSourceEmbedElement,
 } from "@/lib/document-embeds"
 import type { DocumentRevision, LoopDocument } from "@/lib/documents"
 
@@ -67,6 +78,7 @@ type SaveState = "saved" | "dirty" | "saving" | "error"
 export interface DocumentEditorHandle {
   flush: () => Promise<void>
   executeTool: (tool: EditorToolInput) => Promise<EditorToolResult>
+  clearAgentSelectionAnchor: () => void
 }
 
 interface SelectionAction {
@@ -104,6 +116,7 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
   const canEdit = document.role !== "viewer"
   const [title, setTitle] = useState(document.title)
   const [initialContent] = useState(document.content)
+  const [editorSessionId] = useState(() => crypto.randomUUID())
   const [saveState, setSaveState] = useState<SaveState>("saved")
   const [collaborationStatus, setCollaborationStatus] = useState<
     "connecting" | "synced" | "offline" | "error"
@@ -113,11 +126,26 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
   const editorHostRef = useRef<HTMLDivElement>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingValueRef = useRef<Value>(document.content)
+  const pendingSyncSaveRef = useRef(false)
   const editRevisionRef = useRef(0)
   const queuedRevisionRef = useRef(0)
   const savedRevisionRef = useRef(0)
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const collaborationLifecycleRef = useRef<Promise<void>>(Promise.resolve())
+  const agentSelectionAnchorRef = useRef<{
+    range: RangeRef
+    revision: string
+  } | null>(null)
+
+  const editorRevision = useCallback(
+    () => `${editorSessionId}:${editRevisionRef.current}`,
+    [editorSessionId]
+  )
+
+  const clearAgentSelectionAnchor = useCallback(() => {
+    agentSelectionAnchorRef.current?.range.unref()
+    agentSelectionAnchorRef.current = null
+  }, [])
 
   const handleCollaborationConnect = useCallback(() => {
     setCollaborationStatus("connecting")
@@ -172,7 +200,16 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
   const editor = usePlateEditor({
     plugins,
     skipInitialization: true,
+    userId: currentUser.id,
   })
+
+  const retryCollaboration = useCallback(() => {
+    setCollaborationStatus("connecting")
+    setCollaborationError(null)
+    const collaboration = editor.getApi(YjsPlugin).yjs
+    collaboration.disconnect("hocuspocus")
+    collaboration.connect("hocuspocus")
+  }, [editor])
 
   const selectedRangeText = useCallback(
     (range: TRange): string => {
@@ -228,15 +265,21 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
 
   const persistContent = useCallback(
     async (content: Value, revision: number) => {
+      if (revision <= savedRevisionRef.current) {
+        await saveQueueRef.current
+        return true
+      }
       if (revision <= queuedRevisionRef.current) {
         await saveQueueRef.current
-        return
+        if (revision <= savedRevisionRef.current) return true
       }
       queuedRevisionRef.current = revision
       setSaveState("saving")
+      let succeeded = false
       const save = saveQueueRef.current.then(async () => {
         try {
           const updated = await updateDocument(document.id, { content })
+          succeeded = true
           savedRevisionRef.current = Math.max(savedRevisionRef.current, revision)
           onSaved(updated)
           setSaveState(
@@ -248,6 +291,7 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
       })
       saveQueueRef.current = save
       await save
+      return succeeded
     },
     [document.id, onSaved]
   )
@@ -264,8 +308,9 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      clearAgentSelectionAnchor()
     }
-  }, [])
+  }, [clearAgentSelectionAnchor])
 
   useEffect(() => {
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -283,8 +328,8 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
         setSelection(null)
         return
       }
-      const text = selectedRangeText(nextSelection).trim()
-      if (!text) {
+      const text = selectedRangeText(nextSelection)
+      if (!text.trim() || text.length > 10_000) {
         setSelection(null)
         return
       }
@@ -297,7 +342,7 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
         if (!host.contains(domRange.commonAncestorContainer)) return
         const rect = domRange.getBoundingClientRect()
         setSelection({
-          text: text.slice(0, 2_000),
+          text,
           left: Math.min(
             window.innerWidth - 180,
             Math.max(180, rect.left + rect.width / 2)
@@ -337,8 +382,12 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
 
   const scheduleSave = useCallback(
     (content: Value) => {
-      if (!canEdit || collaborationStatus !== "synced") return
       pendingValueRef.current = content
+      if (!canEdit) return
+      if (collaborationStatus !== "synced") {
+        pendingSyncSaveRef.current = true
+        return
+      }
       const revision = ++editRevisionRef.current
       setSaveState("dirty")
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
@@ -350,7 +399,19 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
     [canEdit, collaborationStatus, persistContent]
   )
 
-  const saveTitle = async () => {
+  useEffect(() => {
+    if (
+      !canEdit ||
+      collaborationStatus !== "synced" ||
+      !pendingSyncSaveRef.current
+    ) {
+      return
+    }
+    pendingSyncSaveRef.current = false
+    scheduleSave(pendingValueRef.current)
+  }, [canEdit, collaborationStatus, scheduleSave])
+
+  const saveTitle = useCallback(async () => {
     if (!canEdit) return
     const next = title.trim() || "Untitled"
     setTitle(next)
@@ -359,11 +420,19 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
     try {
       const updated = await updateDocument(document.id, { title: next })
       onSaved(updated)
-      setSaveState("saved")
+      setSaveState(
+        savedRevisionRef.current === editRevisionRef.current ? "saved" : "dirty"
+      )
     } catch {
       setSaveState("error")
     }
-  }
+  }, [canEdit, document.id, document.title, onSaved, title])
+
+  const retrySave = useCallback(async () => {
+    const contentSaved = await flush()
+    if (!contentSaved) return
+    await saveTitle()
+  }, [flush, saveTitle])
 
   const snapshotEditor = useCallback((): EditorSnapshot => {
     const markdown = editor.api.markdown.serialize({
@@ -385,11 +454,25 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
       } catch {
         blockMarkdown = embedNodeText(element) ?? NodeApi.string(element)
       }
+      const embed = isEventEmbedElement(element)
+        ? {
+            sourceType: "event" as const,
+            sourceId: element.eventId,
+            snapshot: element.snapshot,
+          }
+        : isEmailEmbedElement(element)
+          ? {
+              sourceType: "email" as const,
+              sourceId: element.emailId,
+              snapshot: element.snapshot,
+            }
+          : undefined
       return {
         index,
         type: element.type,
         text: embedNodeText(element) ?? NodeApi.string(element),
         markdown: blockMarkdown,
+        ...(embed ? { embed } : {}),
         ...(element.indent !== undefined ? { indent: element.indent } : {}),
         ...(element.listStyleType
           ? { listStyleType: element.listStyleType }
@@ -424,13 +507,14 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
     }
 
     return {
+      revision: editorRevision(),
       title,
       markdown,
       wordCount: markdown.trim().split(/\s+/).filter(Boolean).length,
       blocks,
       selection,
     }
-  }, [editor, selectedRangeText, title])
+  }, [editor, editorRevision, selectedRangeText, title])
 
   const flushEditorValue = useCallback(async () => {
     pendingValueRef.current = editor.children as Value
@@ -439,9 +523,33 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
     await persistContent(pendingValueRef.current, editRevisionRef.current)
   }, [editor, persistContent])
 
+  const applyUndoableMutation = useCallback(
+    (mutation: () => void) => {
+      const yjsEditor = editor as typeof editor & YHistoryEditor
+      yjsEditor.flushLocalChanges()
+      yjsEditor.undoManager.stopCapturing()
+      try {
+        editor.tf.withNewBatch(() => {
+          editor.tf.withoutNormalizing(mutation)
+        })
+        yjsEditor.flushLocalChanges()
+      } finally {
+        yjsEditor.undoManager.stopCapturing()
+      }
+    },
+    [editor]
+  )
+
   const executeTool = useCallback(
     async (tool: EditorToolInput): Promise<EditorToolResult> => {
       if (tool.toolName === "inspectEditor") {
+        clearAgentSelectionAnchor()
+        if (editor.selection && !RangeApi.isCollapsed(editor.selection)) {
+          agentSelectionAnchorRef.current = {
+            range: editor.api.rangeRef(editor.selection, { affinity: "inward" }),
+            revision: editorRevision(),
+          }
+        }
         return { ok: true, ...snapshotEditor() }
       }
 
@@ -449,7 +557,21 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
         return { ok: false, error: "This document is view-only." }
       }
 
+      const expectedRevision =
+        "expectedRevision" in tool.input
+          ? tool.input.expectedRevision
+          : undefined
+      const staleRevision = () =>
+        expectedRevision !== undefined && expectedRevision !== editorRevision()
+      const staleResult = (): EditorToolResult => ({
+        ok: false,
+        error: "The editor changed after inspection. Inspect it again before applying this edit.",
+      })
+
+      if (staleRevision()) return staleResult()
+
       try {
+        await flush()
         await createDocumentCheckpoint(document.id, "agent")
       } catch (error) {
         return {
@@ -461,6 +583,8 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
         }
       }
 
+      if (staleRevision()) return staleResult()
+
       if (tool.toolName === "renameEditorDocument") {
         const nextTitle = tool.input.title.trim()
         setTitle(nextTitle)
@@ -468,7 +592,11 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
         try {
           const updated = await updateDocument(document.id, { title: nextTitle })
           onSaved(updated)
-          setSaveState("saved")
+          setSaveState(
+            savedRevisionRef.current === editRevisionRef.current
+              ? "saved"
+              : "dirty"
+          )
           return { ok: true, title: updated.title, documentId: updated.id }
         } catch (error) {
           setSaveState("error")
@@ -480,20 +608,19 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
       }
 
       if (tool.toolName === "replaceSelection") {
-        if (!editor.selection || editor.api.isCollapsed()) {
+        const anchoredSelection = agentSelectionAnchorRef.current
+        const useAnchoredSelection =
+          anchoredSelection?.revision === tool.input.expectedRevision
+        const targetSelection = useAnchoredSelection
+          ? anchoredSelection.range.current
+          : editor.selection
+        if (!targetSelection || RangeApi.isCollapsed(targetSelection)) {
           return { ok: false, error: "There is no active text selection." }
         }
-        const selectedText = selectedRangeText(editor.selection)
-        if (
-          tool.input.expectedText !== undefined &&
-          selectedText !== tool.input.expectedText
-        ) {
-          return {
-            ok: false,
-            error: "The selection changed after inspection. Inspect the editor again.",
-          }
-        }
-        editor.tf.insertText(tool.input.replacement, { at: editor.selection })
+        applyUndoableMutation(() => {
+          editor.tf.insertText(tool.input.replacement, { at: targetSelection })
+        })
+        if (useAnchoredSelection) clearAgentSelectionAnchor()
         await flushEditorValue()
         return {
           ok: true,
@@ -502,12 +629,6 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
         }
       }
 
-      const currentBlocks = snapshotEditor().blocks
-      const rangeText = (startIndex: number, endIndex: number) =>
-        currentBlocks
-          .slice(startIndex, endIndex + 1)
-          .map((block) => block.text)
-          .join("\n")
       const validRange = (startIndex: number, endIndex: number) =>
         startIndex >= 0 &&
         endIndex >= startIndex &&
@@ -528,21 +649,13 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
           ) {
             return { ok: false, error: "The anchor block no longer exists." }
           }
-          const anchor = currentBlocks[tool.input.blockIndex]
-          if (
-            tool.input.expectedAnchorText !== undefined &&
-            anchor.text !== tool.input.expectedAnchorText
-          ) {
-            return {
-              ok: false,
-              error: "The anchor block changed after inspection. Inspect again.",
-            }
-          }
           index =
             tool.input.blockIndex +
             (tool.input.position === "afterBlock" ? 1 : 0)
         }
-        editor.tf.insertNodes(nodes, { at: [index], select: true })
+        applyUndoableMutation(() => {
+          editor.tf.insertNodes(nodes, { at: [index], select: true })
+        })
         await flushEditorValue()
         return {
           ok: true,
@@ -568,88 +681,221 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
           ) {
             return { ok: false, error: "The anchor block no longer exists." }
           }
-          const anchor = currentBlocks[blockIndex]
-          if (
-            tool.input.expectedAnchorText !== undefined &&
-            anchor.text !== tool.input.expectedAnchorText
-          ) {
-            return {
-              ok: false,
-              error:
-                "The anchor block changed after inspection. Inspect again.",
-            }
-          }
           index =
             blockIndex + (tool.input.position === "afterBlock" ? 1 : 0)
         }
 
-        const appended = index === editor.children.length
-        const embed =
-          tool.toolName === "embedCalendarEvent"
-            ? {
-                type: EVENT_EMBED_KEY,
-                eventId: tool.input.eventId,
-                snapshot: {
-                  title: tool.input.title,
-                  start: tool.input.start,
-                  end: tool.input.end,
-                  allDay: tool.input.allDay,
-                  location: tool.input.location,
-                  color: tool.input.color,
-                  description: tool.input.description,
-                  timezone: tool.input.timezone,
-                  recurrence: tool.input.recurrence,
-                },
-                children: [{ text: "" }],
-              }
-            : {
-                type: EMAIL_EMBED_KEY,
-                emailId: tool.input.emailId,
-                snapshot: {
-                  threadId: tool.input.threadId,
-                  from: tool.input.from,
-                  subject: tool.input.subject,
-                  date: tool.input.date,
-                  snippet: tool.input.snippet,
-                  to: tool.input.to,
-                  cc: tool.input.cc,
-                  bodyPreview: tool.input.bodyPreview,
-                  labels: tool.input.labels,
-                  unread: tool.input.unread,
-                  hasAttachments: tool.input.hasAttachments,
-                  messageCount: tool.input.messageCount,
-                  attachments: tool.input.attachments,
-                },
-                children: [{ text: "" }],
-              }
-
-        editor.tf.withoutNormalizing(() => {
-          editor.tf.insertNodes(embed, { at: [index], select: true })
-          if (appended) {
-            editor.tf.insertNodes(
-              { type: KEYS.p, children: [{ text: "" }] },
-              { at: [index + 1] }
-            )
+        let embed: TSourceEmbedElement
+        try {
+          if (tool.toolName === "embedCalendarEvent") {
+            const event = await getEvent(tool.input.eventId)
+            embed = {
+              type: EVENT_EMBED_KEY,
+              eventId: event.id,
+              snapshot: toEventEmbedSnapshot(event),
+              children: [{ text: "" }],
+            }
+          } else {
+            const email = await getEmail(tool.input.emailId)
+            embed = {
+              type: EMAIL_EMBED_KEY,
+              emailId: email.id,
+              snapshot: toEmailEmbedSnapshot(email),
+              children: [{ text: "" }],
+            }
           }
+        } catch (error) {
+          return {
+            ok: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Unable to load the embedded source.",
+          }
+        }
+
+        if (staleRevision()) return staleResult()
+
+        let insertedAt = index
+        applyUndoableMutation(() => {
+          insertedAt = insertSourceEmbed(editor, embed, index)
         })
         await flushEditorValue()
         return {
           ok: true,
           changeSummary: tool.input.changeSummary,
-          insertedAt: index,
+          insertedAt,
           sourceType:
             tool.toolName === "embedCalendarEvent" ? "event" : "email",
           sourceId:
-            tool.toolName === "embedCalendarEvent"
-              ? tool.input.eventId
-              : tool.input.emailId,
+            embed.type === EVENT_EMBED_KEY ? embed.eventId : embed.emailId,
+          sourceLabel:
+            embed.type === EVENT_EMBED_KEY
+              ? embed.snapshot.title
+              : embed.snapshot.subject,
+        }
+      }
+
+      if (tool.toolName === "updateEmbeddedCalendarEvent") {
+        const index = tool.input.blockIndex
+        const current = editor.children[index]
+        if (
+          !isEventEmbedElement(current) ||
+          current.eventId !== tool.input.expectedSourceId
+        ) {
+          return {
+            ok: false,
+            error:
+              "The calendar event embed at that block changed. Inspect the editor again.",
+          }
+        }
+        let replacement: TSourceEmbedElement
+        try {
+          const event = await getEvent(tool.input.eventId)
+          replacement = {
+            type: EVENT_EMBED_KEY,
+            eventId: event.id,
+            snapshot: toEventEmbedSnapshot(event),
+            children: [{ text: "" }],
+          }
+        } catch (error) {
+          return {
+            ok: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Unable to load the calendar event.",
+          }
+        }
+        if (staleRevision()) return staleResult()
+        const latest = editor.children[index]
+        if (
+          !isEventEmbedElement(latest) ||
+          latest.eventId !== tool.input.expectedSourceId
+        ) {
+          return {
+            ok: false,
+            error:
+              "The calendar event embed at that block changed. Inspect the editor again.",
+          }
+        }
+        applyUndoableMutation(() => {
+          editor.tf.removeNodes({ at: [index] })
+          editor.tf.insertNodes(replacement, { at: [index] })
+        })
+        await flushEditorValue()
+        return {
+          ok: true,
+          changeSummary: tool.input.changeSummary,
+          blockIndex: index,
+          sourceType: "event",
+          sourceId: replacement.eventId,
+          sourceLabel: replacement.snapshot.title,
+        }
+      }
+
+      if (tool.toolName === "updateEmbeddedEmail") {
+        const index = tool.input.blockIndex
+        const current = editor.children[index]
+        if (
+          !isEmailEmbedElement(current) ||
+          current.emailId !== tool.input.expectedSourceId
+        ) {
+          return {
+            ok: false,
+            error:
+              "The email embed at that block changed. Inspect the editor again.",
+          }
+        }
+        let replacement: TSourceEmbedElement
+        try {
+          const email = await getEmail(tool.input.emailId)
+          replacement = {
+            type: EMAIL_EMBED_KEY,
+            emailId: email.id,
+            snapshot: toEmailEmbedSnapshot(email),
+            children: [{ text: "" }],
+          }
+        } catch (error) {
+          return {
+            ok: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Unable to load the email.",
+          }
+        }
+        if (staleRevision()) return staleResult()
+        const latest = editor.children[index]
+        if (
+          !isEmailEmbedElement(latest) ||
+          latest.emailId !== tool.input.expectedSourceId
+        ) {
+          return {
+            ok: false,
+            error:
+              "The email embed at that block changed. Inspect the editor again.",
+          }
+        }
+        applyUndoableMutation(() => {
+          editor.tf.removeNodes({ at: [index] })
+          editor.tf.insertNodes(replacement, { at: [index] })
+        })
+        await flushEditorValue()
+        return {
+          ok: true,
+          changeSummary: tool.input.changeSummary,
+          blockIndex: index,
+          sourceType: "email",
+          sourceId: replacement.emailId,
+          sourceLabel: replacement.snapshot.subject,
+        }
+      }
+
+      if (tool.toolName === "removeSourceEmbed") {
+        const index = tool.input.blockIndex
+        const current = editor.children[index]
+        const matches =
+          tool.input.sourceType === "event"
+            ? isEventEmbedElement(current) &&
+              current.eventId === tool.input.expectedSourceId
+            : isEmailEmbedElement(current) &&
+              current.emailId === tool.input.expectedSourceId
+        if (!matches) {
+          return {
+            ok: false,
+            error:
+              "The embedded source at that block changed. Inspect the editor again.",
+          }
+        }
+        applyUndoableMutation(() => {
+          editor.tf.removeNodes({ at: [index] })
+          if (editor.children.length === 0) {
+            editor.tf.insertNodes(
+              { type: KEYS.p, children: [{ text: "" }] },
+              { at: [0] }
+            )
+          }
+          const targetIndex = Math.min(index, editor.children.length - 1)
+          const target = editor.api.start([targetIndex])
+          if (target) editor.tf.select(target)
+        })
+        await flushEditorValue()
+        return {
+          ok: true,
+          changeSummary: tool.input.changeSummary,
+          blockIndex: index,
+          sourceType: tool.input.sourceType,
+          sourceId: tool.input.expectedSourceId,
+          removedFromDocument: true,
+          sourceDeleted: false,
         }
       }
 
       if (tool.toolName === "replaceEditorDocument") {
         const nodes = editor.api.markdown.deserialize(tool.input.markdown)
         if (!nodes.length) return { ok: false, error: "The replacement is empty." }
-        editor.tf.setValue(nodes)
+        applyUndoableMutation(() => editor.tf.setValue(nodes))
         await flushEditorValue()
         return {
           ok: true,
@@ -658,22 +904,13 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
         }
       }
 
-      const { startIndex, endIndex, expectedText } = tool.input
+      const { startIndex, endIndex } = tool.input
       if (!validRange(startIndex, endIndex)) {
         return { ok: false, error: "The requested block range no longer exists." }
       }
-      if (
-        expectedText !== undefined &&
-        rangeText(startIndex, endIndex) !== expectedText
-      ) {
-        return {
-          ok: false,
-          error: "The requested blocks changed after inspection. Inspect again.",
-        }
-      }
 
       if (tool.toolName === "deleteBlocks") {
-        editor.tf.withoutNormalizing(() => {
+        applyUndoableMutation(() => {
           for (let index = endIndex; index >= startIndex; index -= 1) {
             editor.tf.removeNodes({ at: [index] })
           }
@@ -694,7 +931,7 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
 
       const nodes = editor.api.markdown.deserialize(tool.input.markdown)
       if (!nodes.length) return { ok: false, error: "The replacement is empty." }
-      editor.tf.withoutNormalizing(() => {
+      applyUndoableMutation(() => {
         for (let index = endIndex; index >= startIndex; index -= 1) {
           editor.tf.removeNodes({ at: [index] })
         }
@@ -710,9 +947,13 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
       }
     },
     [
+      applyUndoableMutation,
       canEdit,
+      clearAgentSelectionAnchor,
       document.id,
       editor,
+      editorRevision,
+      flush,
       flushEditorValue,
       onSaved,
       selectedRangeText,
@@ -720,7 +961,17 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
     ]
   )
 
-  useImperativeHandle(ref, () => ({ flush, executeTool }), [executeTool, flush])
+  useImperativeHandle(
+    ref,
+    () => ({
+      clearAgentSelectionAnchor,
+      executeTool,
+      flush: async () => {
+        await flush()
+      },
+    }),
+    [clearAgentSelectionAnchor, executeTool, flush]
+  )
 
   const restoreRevision = useCallback(
     async (revision: DocumentRevision) => {
@@ -733,7 +984,7 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
         saveTimerRef.current = null
       }
       setTitle(revision.title)
-      editor.tf.setValue(revision.content)
+      applyUndoableMutation(() => editor.tf.setValue(revision.content))
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current)
         saveTimerRef.current = null
@@ -743,11 +994,23 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
       await updateDocument(document.id, { title: revision.title })
       await persistContent(revision.content, nextRevision)
     },
-    [canEdit, collaborationStatus, document.id, editor, persistContent]
+    [
+      applyUndoableMutation,
+      canEdit,
+      collaborationStatus,
+      document.id,
+      editor,
+      persistContent,
+    ]
   )
 
   const askAboutSelection = (action: "improve" | "shorten" | "tone") => {
     if (!selection) return
+    clearAgentSelectionAnchor()
+    agentSelectionAnchorRef.current = {
+      range: editor.api.rangeRef(selection.range, { affinity: "inward" }),
+      revision: editorRevision(),
+    }
     editor.tf.select(selection.range)
     editor.tf.focus()
     const instruction =
@@ -778,7 +1041,7 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
     <div className="relative flex h-full min-w-0 flex-1 flex-col bg-inset">
       <Plate
         editor={editor}
-        onChange={({ value }) => scheduleSave(value)}
+        onValueChange={({ value }) => scheduleSave(value)}
         onSelectionChange={({ selection: nextSelection }) =>
           updateSelectionActions(nextSelection)
         }
@@ -795,7 +1058,14 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
             <input
               value={title}
               onChange={(event) => {
-                if (canEdit) setTitle(event.target.value)
+                if (!canEdit) return
+                setTitle(event.target.value)
+                setSaveState(
+                  event.target.value === document.title &&
+                    savedRevisionRef.current === editRevisionRef.current
+                    ? "saved"
+                    : "dirty"
+                )
               }}
               onBlur={() => void saveTitle()}
               onKeyDown={(event) => {
@@ -806,7 +1076,12 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
               className="block h-6 w-full truncate bg-transparent font-heading text-[15px] font-semibold text-ink outline-none read-only:cursor-default"
             />
             <div className="flex items-center gap-2">
-              {canEdit && <SaveIndicator state={saveState} />}
+              {canEdit && (
+                <SaveIndicator
+                  state={saveState}
+                  onRetry={() => void retrySave()}
+                />
+              )}
               <CollaborationIndicator
                 status={collaborationStatus}
                 error={collaborationError}
@@ -847,6 +1122,16 @@ const DocumentEditorInner = forwardRef<DocumentEditorHandle, DocumentEditorProps
                   <p className="mt-1 max-w-xs text-[10px] text-destructive">
                     {collaborationError}
                   </p>
+                )}
+                {(collaborationStatus === "offline" ||
+                  collaborationStatus === "error") && (
+                  <button
+                    type="button"
+                    onClick={retryCollaboration}
+                    className="mx-auto mt-2 inline-flex h-7 items-center gap-1.5 rounded-control bg-ink px-2.5 text-[11px] font-medium text-canvas transition-opacity hover:opacity-90"
+                  >
+                    <RefreshCwIcon className="size-3" /> Retry connection
+                  </button>
                 )}
               </div>
             </div>
@@ -920,12 +1205,22 @@ function SelectionIndicator() {
   )
 }
 
-function SaveIndicator({ state }: { state: SaveState }) {
+function SaveIndicator({
+  state,
+  onRetry,
+}: {
+  state: SaveState
+  onRetry: () => void
+}) {
   if (state === "error") {
     return (
-      <span className="flex items-center gap-1 text-[10px] text-destructive">
+      <button
+        type="button"
+        onClick={onRetry}
+        className="flex items-center gap-1 text-[10px] text-destructive hover:underline"
+      >
         <CircleAlertIcon className="size-2.5" /> Save failed
-      </span>
+      </button>
     )
   }
   if (state === "saved") {

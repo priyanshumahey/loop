@@ -13,7 +13,6 @@ import {
   SearchIcon,
   StarIcon,
 } from "lucide-react"
-import { KEYS, type TElement } from "platejs"
 import { useEditorRef } from "platejs/react"
 import {
   useDeferredValue,
@@ -26,6 +25,7 @@ import type { LoopDocumentEditor } from "@/components/documents/document-editor-
 import {
   EMAIL_EMBED_KEY,
   EVENT_EMBED_KEY,
+  insertSourceEmbed,
   toEmailEmbedSnapshot,
   toEventEmbedSnapshot,
   type TEmailEmbedElement,
@@ -169,17 +169,7 @@ export function SourceEmbedPicker() {
   }, [deferredSearch, events])
 
   const insertEmbed = (node: TEventEmbedElement | TEmailEmbedElement) => {
-    const index = Math.min(insertIndex, editor.children.length)
-    const appended = index === editor.children.length
-    editor.tf.withoutNormalizing(() => {
-      editor.tf.insertNodes(node, { at: [index], select: true })
-      if (appended) {
-        editor.tf.insertNodes<TElement>(
-          { type: KEYS.p, children: [{ text: "" }] },
-          { at: [index + 1] }
-        )
-      }
-    })
+    insertSourceEmbed(editor, node, insertIndex)
     editor.tf.focus()
     setOpen(false)
     setSearch("")

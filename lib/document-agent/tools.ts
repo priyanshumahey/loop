@@ -18,10 +18,13 @@ import {
   embedEmailInputSchema,
   insertBlocksInputSchema,
   inspectEditorInputSchema,
+  removeSourceEmbedInputSchema,
   renameEditorDocumentInputSchema,
   replaceBlocksInputSchema,
   replaceEditorDocumentInputSchema,
   replaceSelectionInputSchema,
+  updateEmbeddedCalendarEventInputSchema,
+  updateEmbeddedEmailInputSchema,
 } from "@/lib/document-agent/editor-tools"
 import {
   markdownToPlateValue,
@@ -352,27 +355,27 @@ export function buildLiveEditorTools() {
     }),
     replaceSelection: tool({
       description:
-        "Replace the user's current text selection directly in the mounted editor. Use only when inspectEditor reports a non-empty selection.",
+        "Replace the text selection captured by inspectEditor. Pass its opaque revision exactly as expectedRevision.",
       inputSchema: replaceSelectionInputSchema,
     }),
     insertBlocks: tool({
       description:
-        "Insert Markdown blocks directly into the mounted editor at the start, end, before a block, or after a block. Use block indexes from inspectEditor and pass expectedAnchorText for indexed positions to prevent stale edits.",
+        "Insert Markdown blocks into the mounted editor. Use indexes from inspectEditor and pass its opaque revision exactly as expectedRevision.",
       inputSchema: insertBlocksInputSchema,
     }),
     replaceBlocks: tool({
       description:
-        "Replace an inclusive range of top-level blocks directly in the mounted editor with Markdown. Use exact block indexes and expectedText from inspectEditor so stale edits are rejected.",
+        "Replace an inclusive range of top-level blocks with Markdown. Use indexes from inspectEditor and pass its opaque revision exactly as expectedRevision.",
       inputSchema: replaceBlocksInputSchema,
     }),
     deleteBlocks: tool({
       description:
-        "Delete an inclusive range of top-level blocks directly from the mounted editor. Use exact block indexes and expectedText from inspectEditor so stale edits are rejected.",
+        "Delete an inclusive range of top-level blocks. Use indexes from inspectEditor and pass its opaque revision exactly as expectedRevision.",
       inputSchema: deleteBlocksInputSchema,
     }),
     replaceEditorDocument: tool({
       description:
-        "Replace the complete mounted editor document with Markdown. Reserve this for broad rewrites; prefer selection or block tools for targeted edits.",
+        "Replace the complete mounted editor document with Markdown. Pass the latest inspectEditor revision exactly as expectedRevision and reserve this for broad rewrites.",
       inputSchema: replaceEditorDocumentInputSchema,
     }),
     renameEditorDocument: tool({
@@ -381,13 +384,28 @@ export function buildLiveEditorTools() {
     }),
     embedCalendarEvent: tool({
       description:
-        "Embed a calendar event as a native card in the mounted document. First resolve the event with a calendar tool and inspectEditor, then copy its stable id and current display fields exactly. Use guarded block placement when inserting beside existing content.",
+        "Embed a calendar event as a native card using only its stable eventId from a calendar tool. The client loads authoritative event details. Use placement and the opaque revision from inspectEditor.",
       inputSchema: embedCalendarEventInputSchema,
     }),
     embedEmail: tool({
       description:
-        "Embed an email as a native card in the mounted document. First resolve the message with listEmails or readEmail and inspectEditor, then copy its stable ids and current display fields exactly. Use guarded block placement when inserting beside existing content.",
+        "Embed an email as a native card using only its stable emailId from an email tool. The client loads the full authoritative message. Use placement and the opaque revision from inspectEditor; reading the email first is unnecessary for an embed-only request.",
       inputSchema: embedEmailInputSchema,
+    }),
+    updateEmbeddedCalendarEvent: tool({
+      description:
+        "Replace or refresh a calendar event card using the desired stable eventId. Copy the current block index, source id, and revision from inspectEditor. The client loads event details; this changes the card, not the calendar source.",
+      inputSchema: updateEmbeddedCalendarEventInputSchema,
+    }),
+    updateEmbeddedEmail: tool({
+      description:
+        "Replace or refresh an email card using the desired stable emailId. Copy the current block index, source id, and revision from inspectEditor. The client loads email details; this changes the card, not the email source.",
+      inputSchema: updateEmbeddedEmailInputSchema,
+    }),
+    removeSourceEmbed: tool({
+      description:
+        "Remove one calendar event or email card from the document without deleting the underlying source. Copy its block index, source type, source id, and opaque revision from inspectEditor. sourceLabel is optional display context.",
+      inputSchema: removeSourceEmbedInputSchema,
     }),
   }
 }

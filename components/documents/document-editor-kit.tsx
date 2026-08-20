@@ -50,17 +50,27 @@ import {
   TaskListRules,
 } from "@platejs/list"
 import { ListPlugin } from "@platejs/list/react"
-import { MarkdownPlugin } from "@platejs/markdown"
+import { MarkdownPlugin, remarkMdx } from "@platejs/markdown"
 import { MathRules } from "@platejs/math"
 import { EquationPlugin, InlineEquationPlugin } from "@platejs/math/react"
+import {
+  SlashInputPlugin,
+  SlashPlugin,
+} from "@platejs/slash-command/react"
 import { all, createLowlight } from "lowlight"
-import { KEYS, type Value } from "platejs"
+import {
+  ExitBreakPlugin,
+  KEYS,
+  TrailingBlockPlugin,
+  type Value,
+} from "platejs"
 import { ParagraphPlugin, type TPlateEditor } from "platejs/react"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
 
 import { createAutoformatKit } from "@/components/editor/plugins/autoformat-kit"
 import { SourceEmbedKit } from "@/components/editor/plugins/source-embed-kit"
+import { TableKit } from "@/components/editor/plugins/table-kit"
 import { BlockList } from "@/components/editor/ui/block-list"
 import {
   CodeBlockElement,
@@ -73,6 +83,7 @@ import {
 } from "@/components/editor/ui/equation-node"
 import { LinkElement } from "@/components/editor/ui/link-node"
 import { LinkFloatingToolbar } from "@/components/editor/ui/link-toolbar"
+import { SlashInputElement } from "@/components/editor/ui/slash-node"
 import { BlockquoteElement } from "@/components/ui/blockquote-node"
 import { CodeLeaf } from "@/components/ui/code-node"
 import {
@@ -271,11 +282,28 @@ export function createDocumentEditorKit(isEnabled: () => boolean) {
       inputRules: [MathRules.markdown({ enabled, on: "break", variant: "$$" })],
       node: { component: EquationElement },
     }),
+    SlashPlugin.configure({
+      options: {
+        triggerQuery: (editor) =>
+          !editor.api.some({
+            match: { type: editor.getType(KEYS.codeBlock) },
+          }),
+      },
+    }),
+    SlashInputPlugin.withComponent(SlashInputElement),
+    ...TableKit,
     ...SourceEmbedKit,
     MarkdownPlugin.configure({
-      options: { remarkPlugins: [remarkGfm, remarkMath] },
+      options: { remarkPlugins: [remarkGfm, remarkMdx, remarkMath] },
     }),
     ...createAutoformatKit(isEnabled),
+    ExitBreakPlugin.configure({
+      shortcuts: {
+        insert: { keys: "mod+enter" },
+        insertBefore: { keys: "mod+shift+enter" },
+      },
+    }),
+    TrailingBlockPlugin,
   ]
 }
 

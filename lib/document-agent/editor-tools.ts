@@ -1,5 +1,10 @@
 import { z } from "zod"
 
+import type {
+  EmailEmbedSnapshot,
+  EventEmbedSnapshot,
+} from "@/lib/document-embeds"
+
 export const selectedTextContextSchema = z
   .object({
     text: z.string().min(1).max(10_000),
@@ -13,14 +18,22 @@ export type SelectedTextContext = z.infer<typeof selectedTextContextSchema>
 
 export const inspectEditorInputSchema = z.object({})
 
+const expectedRevisionSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .describe("The opaque revision returned by the latest inspectEditor call.")
+
 export const replaceSelectionInputSchema = z.object({
   replacement: z.string(),
+  expectedRevision: expectedRevisionSchema,
   expectedText: z.string().optional(),
   changeSummary: z.string().trim().min(1).max(240),
 })
 
 export const insertBlocksInputSchema = z.object({
   markdown: z.string().min(1),
+  expectedRevision: expectedRevisionSchema,
   position: z.enum(["start", "end", "beforeBlock", "afterBlock"]),
   blockIndex: z.number().int().min(0).optional(),
   expectedAnchorText: z.string().optional(),
@@ -31,6 +44,7 @@ export const replaceBlocksInputSchema = z.object({
   startIndex: z.number().int().min(0),
   endIndex: z.number().int().min(0),
   markdown: z.string().min(1),
+  expectedRevision: expectedRevisionSchema,
   expectedText: z.string().optional(),
   changeSummary: z.string().trim().min(1).max(240),
 })
@@ -38,12 +52,14 @@ export const replaceBlocksInputSchema = z.object({
 export const deleteBlocksInputSchema = z.object({
   startIndex: z.number().int().min(0),
   endIndex: z.number().int().min(0),
+  expectedRevision: expectedRevisionSchema,
   expectedText: z.string().optional(),
   changeSummary: z.string().trim().min(1).max(240),
 })
 
 export const replaceEditorDocumentInputSchema = z.object({
   markdown: z.string().min(1),
+  expectedRevision: expectedRevisionSchema,
   changeSummary: z.string().trim().min(1).max(240),
 })
 
@@ -53,6 +69,7 @@ export const renameEditorDocumentInputSchema = z.object({
 
 const embedPlacementSchema = z
   .object({
+    expectedRevision: expectedRevisionSchema,
     position: z
       .enum(["start", "end", "beforeBlock", "afterBlock"])
       .default("end"),
@@ -67,54 +84,54 @@ const embedPlacementSchema = z
     { message: "blockIndex is required for indexed placement" }
   )
 
-export const embedCalendarEventInputSchema = embedPlacementSchema.extend({
-  eventId: z.string().trim().min(1).max(240),
-  title: z.string().trim().min(1).max(500),
-  start: z.string().trim().min(1).max(100),
-  end: z.string().trim().min(1).max(100),
-  allDay: z.boolean().optional(),
-  location: z.string().trim().max(500).optional(),
-  color: z.string().trim().max(40).optional(),
-  description: z.string().trim().max(2_000).optional(),
-  timezone: z.string().trim().max(100).optional(),
-  recurrence: z
-    .object({
-      frequency: z.enum(["daily", "weekly", "monthly", "yearly"]),
-      interval: z.number().int().min(1).max(99).optional(),
-      byWeekday: z.array(z.number().int().min(0).max(6)).max(7).optional(),
-      ends: z.enum(["never", "on", "after"]).optional(),
-      until: z.string().trim().max(20).optional(),
-      count: z.number().int().min(1).max(999).optional(),
-      readOnly: z.boolean().optional(),
-    })
-    .optional(),
+const calendarEventSourceSchema = z.object({
+  eventId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(240)
+    .describe("A stable event id returned by a calendar tool."),
 })
 
-export const embedEmailInputSchema = embedPlacementSchema.extend({
-  emailId: z.string().trim().min(1).max(240),
-  threadId: z.string().trim().min(1).max(240),
-  from: z.string().trim().min(1).max(500),
-  subject: z.string().trim().min(1).max(1_000),
-  date: z.string().trim().min(1).max(100),
-  snippet: z.string().trim().max(2_000),
-  to: z.string().trim().max(2_000).optional(),
-  cc: z.string().trim().max(2_000).optional(),
-  bodyPreview: z.string().trim().max(2_000).optional(),
-  labels: z.array(z.string().trim().max(100)).max(20).optional(),
-  unread: z.boolean().optional(),
-  hasAttachments: z.boolean().optional(),
-  messageCount: z.number().int().min(1).max(10_000).optional(),
-  attachments: z
-    .array(
-      z.object({
-        attachmentId: z.string().trim().min(1).max(500),
-        filename: z.string().trim().min(1).max(1_000),
-        mimeType: z.string().trim().min(1).max(200),
-        size: z.number().int().min(0),
-      })
-    )
-    .max(8)
-    .optional(),
+const emailSourceSchema = z.object({
+  emailId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(240)
+    .describe("A stable message id returned by an email tool."),
+})
+
+export const embedCalendarEventInputSchema = embedPlacementSchema.extend(
+  calendarEventSourceSchema.shape
+)
+
+export const embedEmailInputSchema = embedPlacementSchema.extend(
+  emailSourceSchema.shape
+)
+
+const embedTargetSchema = z.object({
+  expectedRevision: expectedRevisionSchema,
+  blockIndex: z.number().int().min(0),
+  expectedSourceId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(240)
+    .describe("The current source id returned for this block by inspectEditor."),
+  changeSummary: z.string().trim().min(1).max(240),
+})
+
+export const updateEmbeddedCalendarEventInputSchema =
+  embedTargetSchema.extend(calendarEventSourceSchema.shape)
+
+export const updateEmbeddedEmailInputSchema = embedTargetSchema.extend(
+  emailSourceSchema.shape
+)
+
+export const removeSourceEmbedInputSchema = embedTargetSchema.extend({
+  sourceType: z.enum(["event", "email"]),
+  sourceLabel: z.string().trim().min(1).max(1_000).optional(),
 })
 
 export const EDITOR_TOOL_NAMES = [
@@ -127,6 +144,9 @@ export const EDITOR_TOOL_NAMES = [
   "renameEditorDocument",
   "embedCalendarEvent",
   "embedEmail",
+  "updateEmbeddedCalendarEvent",
+  "updateEmbeddedEmail",
+  "removeSourceEmbed",
 ] as const
 
 export const EDITOR_WRITE_TOOL_NAMES = [
@@ -138,6 +158,9 @@ export const EDITOR_WRITE_TOOL_NAMES = [
   "renameEditorDocument",
   "embedCalendarEvent",
   "embedEmail",
+  "updateEmbeddedCalendarEvent",
+  "updateEmbeddedEmail",
+  "removeSourceEmbed",
 ] as const
 
 export type EditorToolName = (typeof EDITOR_TOOL_NAMES)[number]
@@ -153,6 +176,9 @@ export type EditorToolInput =
   | { toolName: "renameEditorDocument"; input: z.infer<typeof renameEditorDocumentInputSchema> }
   | { toolName: "embedCalendarEvent"; input: z.infer<typeof embedCalendarEventInputSchema> }
   | { toolName: "embedEmail"; input: z.infer<typeof embedEmailInputSchema> }
+  | { toolName: "updateEmbeddedCalendarEvent"; input: z.infer<typeof updateEmbeddedCalendarEventInputSchema> }
+  | { toolName: "updateEmbeddedEmail"; input: z.infer<typeof updateEmbeddedEmailInputSchema> }
+  | { toolName: "removeSourceEmbed"; input: z.infer<typeof removeSourceEmbedInputSchema> }
 
 export interface EditorToolResult {
   ok: boolean
@@ -170,6 +196,17 @@ export interface EditorBlockSnapshot {
   checked?: boolean
   language?: string
   texExpression?: string
+  embed?:
+    | {
+        sourceType: "event"
+        sourceId: string
+        snapshot: EventEmbedSnapshot
+      }
+    | {
+        sourceType: "email"
+        sourceId: string
+        snapshot: EmailEmbedSnapshot
+      }
 }
 
 export interface EditorSelectionSnapshot {
@@ -179,6 +216,7 @@ export interface EditorSelectionSnapshot {
 }
 
 export interface EditorSnapshot {
+  revision: string
   title: string
   markdown: string
   wordCount: number
@@ -219,5 +257,14 @@ export function parseEditorToolInput(
       return { toolName, input: embedCalendarEventInputSchema.parse(input) }
     case "embedEmail":
       return { toolName, input: embedEmailInputSchema.parse(input) }
+    case "updateEmbeddedCalendarEvent":
+      return {
+        toolName,
+        input: updateEmbeddedCalendarEventInputSchema.parse(input),
+      }
+    case "updateEmbeddedEmail":
+      return { toolName, input: updateEmbeddedEmailInputSchema.parse(input) }
+    case "removeSourceEmbed":
+      return { toolName, input: removeSourceEmbedInputSchema.parse(input) }
   }
 }

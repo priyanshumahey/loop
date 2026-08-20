@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { useRef, useState } from "react"
+import { useRef, useState, type CSSProperties } from "react"
 
 import {
   DocumentAgent,
@@ -14,6 +14,8 @@ import {
 } from "@/components/documents/document-editor"
 import { DocumentsSidebar } from "@/components/documents/documents-sidebar"
 import { LoopMark } from "@/components/loop-logo"
+import { usePersistentState } from "@/hooks/use-persistent-state"
+import { useSidebarResize } from "@/hooks/use-sidebar-resize"
 import {
   createDocument,
   fetchDocument,
@@ -25,6 +27,11 @@ import {
   type LoopDocument,
 } from "@/lib/documents"
 import type { SelectedTextContext } from "@/lib/document-agent/editor-tools"
+import { cn } from "@/lib/utils"
+
+const DEFAULT_AGENT_WIDTH = "390px"
+const MIN_AGENT_WIDTH = "20rem"
+const MAX_AGENT_WIDTH = "34rem"
 
 export function DocumentWorkspace({
   initialDocument,
@@ -41,9 +48,26 @@ export function DocumentWorkspace({
   const [document, setDocument] = useState(initialDocument)
   const [agentOpen, setAgentOpen] = useState(true)
   const [agentRefreshing, setAgentRefreshing] = useState(false)
+  const [agentWidth, setAgentWidth] = usePersistentState(
+    "loop:document-agent:width",
+    DEFAULT_AGENT_WIDTH
+  )
+  const [isResizingAgent, setIsResizingAgent] = useState(false)
   const [pendingAgentRequest, setPendingAgentRequest] =
     useState<PendingDocumentAgentRequest | null>(null)
   const editorRef = useRef<DocumentEditorHandle>(null)
+
+  const { dragRef, handleMouseDown } = useSidebarResize({
+    direction: "left",
+    currentWidth: agentWidth,
+    onResize: setAgentWidth,
+    minResizeWidth: MIN_AGENT_WIDTH,
+    maxResizeWidth: MAX_AGENT_WIDTH,
+    enableAutoCollapse: false,
+    enableToggle: false,
+    isNested: true,
+    setIsDraggingRail: setIsResizingAgent,
+  })
 
   const createBlank = async () => {
     const created = await createDocument({
@@ -109,7 +133,23 @@ export function DocumentWorkspace({
           />
 
           {agentOpen && (
-            <aside className="absolute inset-0 z-40 min-w-0 bg-surface sm:inset-y-0 sm:left-auto sm:w-[min(390px,44vw)] sm:border-l sm:border-line lg:relative lg:z-auto lg:w-[390px] lg:shrink-0">
+            <aside
+              className={cn(
+                "absolute inset-0 z-40 min-w-0 bg-surface sm:inset-y-0 sm:left-auto sm:w-[min(390px,44vw)] sm:border-l sm:border-line lg:relative lg:z-auto lg:w-[var(--agent-width)] lg:shrink-0",
+                !isResizingAgent &&
+                  "lg:transition-[width] lg:duration-150 lg:ease-linear"
+              )}
+              style={{ "--agent-width": agentWidth } as CSSProperties}
+            >
+              <button
+                ref={dragRef}
+                type="button"
+                aria-label="Resize Loop assistant"
+                title="Resize Loop assistant"
+                tabIndex={-1}
+                onMouseDown={handleMouseDown}
+                className="group/rail absolute inset-y-0 left-0 z-50 hidden w-4 -translate-x-1/2 cursor-col-resize after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] after:transition-colors hover:after:bg-line-strong lg:block"
+              />
               <DocumentAgent
                 scope="document"
                 documentId={document.id}
@@ -129,8 +169,14 @@ export function DocumentWorkspace({
                   }
                   return editor.executeTool(tool)
                 }}
+                onEditorEditSettled={() =>
+                  editorRef.current?.clearAgentSelectionAnchor()
+                }
                 onMutated={(mutation) => void handleMutation(mutation)}
-                onClose={() => setAgentOpen(false)}
+                onClose={() => {
+                  editorRef.current?.clearAgentSelectionAnchor()
+                  setAgentOpen(false)
+                }}
               />
               {agentRefreshing && (
                 <div className="pointer-events-none absolute inset-x-3 top-14 z-10 rounded-control bg-inset px-3 py-2 text-center text-[11px] text-ink-3 shadow-card">

@@ -146,11 +146,17 @@ export function EventEmbedElement(
 ) {
   const selected = useSelected()
   const readOnly = useReadOnly()
-  const [liveSnapshot, setLiveSnapshot] = useState<EventEmbedSnapshot | null>(
-    null
-  )
+  const [liveSource, setLiveSource] = useState<{
+    sourceId: string
+    embeddedSnapshot: EventEmbedSnapshot
+    snapshot: EventEmbedSnapshot
+  } | null>(null)
   const [sourceUnavailable, setSourceUnavailable] = useState(false)
-  const snapshot = liveSnapshot ?? props.element.snapshot
+  const snapshot =
+    liveSource?.sourceId === props.element.eventId &&
+    liveSource.embeddedSnapshot === props.element.snapshot
+      ? liveSource.snapshot
+      : props.element.snapshot
   const start = new Date(snapshot.start)
   const duration = eventDuration(snapshot)
   const recurrence = recurrenceLabel(snapshot.recurrence)
@@ -160,7 +166,11 @@ export function EventEmbedElement(
     getEvent(props.element.eventId)
       .then((event) => {
         if (cancelled) return
-        setLiveSnapshot(toEventEmbedSnapshot(event))
+        setLiveSource({
+          sourceId: props.element.eventId,
+          embeddedSnapshot: props.element.snapshot,
+          snapshot: toEventEmbedSnapshot(event),
+        })
         setSourceUnavailable(false)
       })
       .catch(() => {
@@ -169,7 +179,7 @@ export function EventEmbedElement(
     return () => {
       cancelled = true
     }
-  }, [props.element.eventId])
+  }, [props.element.eventId, props.element.snapshot])
   const params = new URLSearchParams({
     event: props.element.eventId,
     date: snapshot.start,
@@ -288,11 +298,17 @@ export function EmailEmbedElement(
 ) {
   const selected = useSelected()
   const readOnly = useReadOnly()
-  const [liveSnapshot, setLiveSnapshot] = useState<EmailEmbedSnapshot | null>(
-    null
-  )
+  const [liveSource, setLiveSource] = useState<{
+    sourceId: string
+    embeddedSnapshot: EmailEmbedSnapshot
+    snapshot: EmailEmbedSnapshot
+  } | null>(null)
   const [sourceUnavailable, setSourceUnavailable] = useState(false)
-  const snapshot = liveSnapshot ?? props.element.snapshot
+  const snapshot =
+    liveSource?.sourceId === props.element.emailId &&
+    liveSource.embeddedSnapshot === props.element.snapshot
+      ? liveSource.snapshot
+      : props.element.snapshot
   const sender = parseAddress(snapshot.from || "Unknown sender")
   const recipients = recipientSummary(snapshot.to, snapshot.cc)
   const labels = snapshot.labels ?? []
@@ -307,7 +323,11 @@ export function EmailEmbedElement(
     getEmail(props.element.emailId)
       .then((email) => {
         if (cancelled) return
-        setLiveSnapshot(toEmailEmbedSnapshot(email))
+        setLiveSource({
+          sourceId: props.element.emailId,
+          embeddedSnapshot: props.element.snapshot,
+          snapshot: toEmailEmbedSnapshot(email),
+        })
         setSourceUnavailable(false)
       })
       .catch(() => {
@@ -316,7 +336,7 @@ export function EmailEmbedElement(
     return () => {
       cancelled = true
     }
-  }, [props.element.emailId])
+  }, [props.element.emailId, props.element.snapshot])
 
   return (
     <PlateElement className="my-3" {...props}>

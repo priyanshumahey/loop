@@ -78,6 +78,9 @@ const MUTATION_TYPES = new Set([
   "tool-renameEditorDocument",
   "tool-embedCalendarEvent",
   "tool-embedEmail",
+  "tool-updateEmbeddedCalendarEvent",
+  "tool-updateEmbeddedEmail",
+  "tool-removeSourceEmbed",
 ])
 
 const LIVE_EDITOR_MUTATION_TYPES = new Set([
@@ -89,6 +92,9 @@ const LIVE_EDITOR_MUTATION_TYPES = new Set([
   "tool-renameEditorDocument",
   "tool-embedCalendarEvent",
   "tool-embedEmail",
+  "tool-updateEmbeddedCalendarEvent",
+  "tool-updateEmbeddedEmail",
+  "tool-removeSourceEmbed",
 ])
 
 export interface PendingDocumentAgentRequest {
@@ -109,6 +115,7 @@ interface DocumentAgentProps {
   onPendingRequestHandled?: (id: string) => void
   onBeforeSend?: () => Promise<void>
   executeEditorTool?: (tool: EditorToolInput) => Promise<EditorToolResult>
+  onEditorEditSettled?: () => void
   onMutated?: (mutation: DocumentAgentMutation) => void
   onClose?: () => void
 }
@@ -140,6 +147,7 @@ function DocumentAgentSession(
     onPendingRequestHandled,
     onBeforeSend,
     executeEditorTool,
+    onEditorEditSettled,
     onMutated,
     onClose,
     store,
@@ -183,7 +191,7 @@ function DocumentAgentSession(
     ),
     async onToolCall({ toolCall }) {
       if (toolCall.dynamic || !isEditorToolName(toolCall.toolName)) return
-      if (isEditorWriteToolName(toolCall.toolName)) return
+      if (isEditorWriteToolName(toolCall.toolName) && !autoApprove) return
 
       if (!executeEditorTool) {
         addToolOutput({
@@ -211,6 +219,10 @@ function DocumentAgentSession(
           errorText:
             cause instanceof Error ? cause.message : "Editor inspection failed",
         })
+      } finally {
+        if (isEditorWriteToolName(toolCall.toolName)) {
+          onEditorEditSettled?.()
+        }
       }
     },
     sendAutomaticallyWhen: ({ messages: currentMessages }) =>
@@ -230,6 +242,7 @@ function DocumentAgentSession(
       if (!next || streaming) return
       await onBeforeSend?.()
       const attachedContext = context ?? selectedTextContext ?? undefined
+      if (!attachedContext) onEditorEditSettled?.()
       sendMessage({
         text: next,
         metadata: attachedContext
@@ -238,7 +251,13 @@ function DocumentAgentSession(
       })
       setSelectedTextContext(null)
     },
-    [onBeforeSend, selectedTextContext, sendMessage, streaming]
+    [
+      onBeforeSend,
+      onEditorEditSettled,
+      selectedTextContext,
+      sendMessage,
+      streaming,
+    ]
   )
 
   const openEvent = useCallback(
@@ -279,11 +298,11 @@ function DocumentAgentSession(
         return
       }
       processedRequestRef.current = pendingRequest.id
+      onPendingRequestHandled?.(pendingRequest.id)
       if (pendingRequest.context) {
         setSelectedTextContext(pendingRequest.context)
       }
       await send(pendingRequest.text, pendingRequest.context)
-      if (!cancelled) onPendingRequestHandled?.(pendingRequest.id)
     })
     return () => {
       cancelled = true
@@ -302,8 +321,11 @@ function DocumentAgentSession(
     [addToolApprovalResponse]
   )
   const reject = useCallback(
-    (id: string) => addToolApprovalResponse({ id, approved: false }),
-    [addToolApprovalResponse]
+    (id: string) => {
+      addToolApprovalResponse({ id, approved: false })
+      onEditorEditSettled?.()
+    },
+    [addToolApprovalResponse, onEditorEditSettled]
   )
 
   const executeClientTool = useCallback(
@@ -334,9 +356,11 @@ function DocumentAgentSession(
           errorText:
             cause instanceof Error ? cause.message : "Editor update failed",
         })
+      } finally {
+        onEditorEditSettled?.()
       }
     },
-    [addToolOutput, executeEditorTool]
+    [addToolOutput, executeEditorTool, onEditorEditSettled]
   )
 
   const rejectClientTool = useCallback(
@@ -351,8 +375,9 @@ function DocumentAgentSession(
           error: "User cancelled the edit.",
         },
       })
+      onEditorEditSettled?.()
     },
-    [addToolOutput]
+    [addToolOutput, onEditorEditSettled]
   )
 
   const nudgedApprovalRef = useRef<string | null>(null)
@@ -546,8 +571,14 @@ function DocumentAgentSession(
         conversations={store.conversations}
         activeId={store.activeId}
         isDraft={store.isDraft}
-        onNewChat={store.newChat}
-        onSelect={store.select}
+        onNewChat={() => {
+          onEditorEditSettled?.()
+          store.newChat()
+        }}
+        onSelect={(id) => {
+          onEditorEditSettled?.()
+          store.select(id)
+        }}
         onCloseTab={store.closeTab}
         onDelete={store.remove}
       />
@@ -892,7 +923,8 @@ function WriterToolPart({
     const destructive =
       toolName === "deleteUserDocument" ||
       toolName === "deleteUserFolder" ||
-      toolName === "deleteBlocks"
+      toolName === "deleteBlocks" ||
+      toolName === "removeSourceEmbed"
     const clientMutation = LIVE_EDITOR_MUTATION_TYPES.has(part.type ?? "")
     const awaitingClientApproval =
       clientMutation && part.state === "input-available"
@@ -1087,9 +1119,25 @@ function EditorEditPreview({
           : `${position === "beforeBlock" ? "Before" : "After"} block ${blockIndex ?? "?"}`
     after =
       toolName === "embedCalendarEvent"
-        ? `${String(input.title ?? "Untitled event")}\n${String(input.start ?? "")}${input.location ? `\n${String(input.location)}` : ""}`
-        : `${String(input.subject ?? "(no subject)")}\nFrom ${String(input.from ?? "Unknown sender")}\n${String(input.snippet ?? "")}`
+        ? `Calendar event\n${String(input.eventId ?? "Unknown source")}`
+        : `Email\n${String(input.emailId ?? "Unknown source")}`
     afterLabel = toolName === "embedCalendarEvent" ? "Event card" : "Email card"
+  } else if (
+    toolName === "updateEmbeddedCalendarEvent" ||
+    toolName === "updateEmbeddedEmail"
+  ) {
+    target = `${toolName === "updateEmbeddedCalendarEvent" ? "Event" : "Email"} card at block ${blockIndex ?? "?"}`
+    after =
+      toolName === "updateEmbeddedCalendarEvent"
+        ? `Calendar event\n${String(input.eventId ?? "Unknown source")}`
+        : `Email\n${String(input.emailId ?? "Unknown source")}`
+    afterLabel = "Updated card"
+  } else if (toolName === "removeSourceEmbed") {
+    target = `${input.sourceType === "event" ? "Event" : "Email"} card at block ${blockIndex ?? "?"}`
+    before = String(
+      input.sourceLabel ?? input.expectedSourceId ?? "Embedded source"
+    )
+    beforeLabel = "Remove from document"
   } else if (toolName === "renameEditorDocument") {
     target = "Document title"
     after = String(input.title ?? "Untitled")
@@ -1161,6 +1209,9 @@ function applyLabel(toolName: string): string {
   if (toolName === "renameEditorDocument") return "Rename document"
   if (toolName === "embedCalendarEvent") return "Embed event"
   if (toolName === "embedEmail") return "Embed email"
+  if (toolName === "updateEmbeddedCalendarEvent") return "Update event card"
+  if (toolName === "updateEmbeddedEmail") return "Update email card"
+  if (toolName === "removeSourceEmbed") return "Remove card"
   return "Apply change"
 }
 
@@ -1180,8 +1231,11 @@ function mutationTitle(toolName: string, input?: Record<string, unknown>): strin
   if (toolName === "deleteBlocks") return `Delete blocks ${String(input?.startIndex ?? "?")}–${String(input?.endIndex ?? "?")}`
   if (toolName === "replaceEditorDocument") return "Rewrite document"
   if (toolName === "renameEditorDocument") return `Rename to “${String(input?.title ?? "Untitled")}”`
-  if (toolName === "embedCalendarEvent") return `Embed “${String(input?.title ?? "event")}"`
-  if (toolName === "embedEmail") return `Embed “${String(input?.subject ?? "email")}"`
+  if (toolName === "embedCalendarEvent") return "Embed calendar event"
+  if (toolName === "embedEmail") return "Embed email"
+  if (toolName === "updateEmbeddedCalendarEvent") return "Update event card"
+  if (toolName === "updateEmbeddedEmail") return "Update email card"
+  if (toolName === "removeSourceEmbed") return `Remove “${String(input?.sourceLabel ?? "embedded source")}” from document`
   if (toolName === "appendToCurrentDocument") return "Append to document"
   return "Revise document"
 }
@@ -1200,10 +1254,14 @@ function mutationDescription(
     if (toolName === "moveDocumentToFolder") return "The document was moved."
     if (toolName === "embedCalendarEvent") return "The event is embedded in the document."
     if (toolName === "embedEmail") return "The email is embedded in the document."
+    if (toolName === "updateEmbeddedCalendarEvent") return "The event card was updated."
+    if (toolName === "updateEmbeddedEmail") return "The email card was updated."
+    if (toolName === "removeSourceEmbed") return "The card was removed from the document. The source was not deleted."
     return String(output.changeSummary ?? "The document was updated.")
   }
   if (toolName === "deleteUserDocument") return "This permanently removes the document and its revision history."
   if (toolName === "deleteUserFolder") return "Documents inside it will move back to the library root."
+  if (toolName === "removeSourceEmbed") return String(input?.changeSummary ?? "This removes only the card from the document, not its source.")
   return String(input?.changeSummary ?? "Loop is ready to apply this change.")
 }
 
