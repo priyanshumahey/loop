@@ -59,6 +59,19 @@ export async function syncEvents(params: {
   }
 }
 
+/** Fetch one event by its stable id. */
+export async function getEvent(eventId: string): Promise<CalendarEvent> {
+  const response = await fetch(`${API_BASE}/${eventId}`)
+
+  if (!response.ok) {
+    const error: ApiResponse<never> = await response.json()
+    throw new Error(error.error || 'Failed to load event')
+  }
+
+  const result: ApiResponse<SerializedEvent> = await response.json()
+  return deserializeEvent(result.data!)
+}
+
 export async function createEvent(
   event: Omit<CalendarEvent, 'id'> & { id?: string }
 ): Promise<CalendarEvent> {

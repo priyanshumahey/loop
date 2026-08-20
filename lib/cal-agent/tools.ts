@@ -46,6 +46,8 @@ export interface AgentEvent {
   color: string | null
   recurringEventId: string | null
   originalStart: string | null
+  timezone?: string | null
+  recurrence?: EventRecurrence | null
 }
 
 /** Gmail's inbox category tabs, normalized. */
@@ -73,6 +75,19 @@ export interface AgentEmail {
   starred: boolean
   /** Which inbox tab Gmail sorted it into, when known. */
   category: EmailCategory | null
+  to?: string
+  cc?: string
+  labels?: string[]
+  hasAttachments?: boolean
+  messageCount?: number
+  attachments?: {
+    attachmentId: string
+    filename: string
+    mimeType: string
+    size: number
+    inline: boolean
+    contentId: string
+  }[]
 }
 
 /** Per-day meeting-hours breakdown for the stats card. */
@@ -228,6 +243,8 @@ function toAgentEvent(e: CalendarEvent): AgentEvent {
     color: e.color ?? null,
     recurringEventId: e.recurringEventId ?? null,
     originalStart: e.originalStart ?? null,
+    timezone: e.timezone ?? null,
+    recurrence: e.recurrence ?? null,
   }
 }
 
@@ -946,6 +963,11 @@ function toAgentEmail(msg: {
   date: string
   unread: boolean
   labels: string[]
+  to?: string
+  cc?: string
+  hasAttachments?: boolean
+  messageCount?: number
+  attachments?: AgentEmail["attachments"]
 }): AgentEmail {
   const sender = parseSender(msg.from)
   const parsed = new Date(msg.date)
@@ -961,6 +983,12 @@ function toAgentEmail(msg: {
     important: msg.labels.includes("IMPORTANT"),
     starred: msg.labels.includes("STARRED"),
     category: gmailCategory(msg.labels),
+    to: msg.to,
+    cc: msg.cc,
+    labels: msg.labels,
+    hasAttachments: msg.hasAttachments,
+    messageCount: msg.messageCount,
+    attachments: msg.attachments,
   }
 }
 

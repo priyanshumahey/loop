@@ -1,9 +1,9 @@
 'use client'
 
 import { MailIcon, RefreshCwIcon, SearchIcon } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import type { Email } from '@/lib/api/emails'
+import { getEmail, type Email } from '@/lib/api/emails'
 import type { AgentEmail } from '@/lib/cal-agent/tools'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -102,6 +102,7 @@ export function MailView() {
   const [folder, setFolder] = useState<MailFolder>('all')
   const [selected, setSelected] = useState<Email | null>(null)
   const [contextEmails, setContextEmails] = useState<ContextEmail[]>([])
+  const [openError, setOpenError] = useState<string | null>(null)
 
   const query = useMemo(
     () => [folderQuery(folder), search.trim()].filter(Boolean).join(' '),
@@ -139,6 +140,27 @@ export function MailView() {
     [markThreadRead]
   )
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const emailId = params.get('email')
+    if (!emailId) return
+
+    window.history.replaceState(null, '', window.location.pathname)
+    let cancelled = false
+    getEmail(emailId)
+      .then((email) => {
+        if (cancelled) return
+        setOpenError(null)
+        selectEmail(email)
+      })
+      .catch(() => {
+        if (!cancelled) setOpenError('That email could not be opened.')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectEmail])
+
   const openAgentEmail = (a: AgentEmail) => selectEmail(agentEmailToSummary(a))
 
   const attachToCopilot = useCallback((email: Email) => {
@@ -157,19 +179,23 @@ export function MailView() {
 
   if (!isConnected && !isLoading) {
     return (
-      <div className="grid h-svh place-items-center bg-muted/40 p-8 text-center">
-        <div className="max-w-sm space-y-3">
-          <span className="mx-auto grid size-12 place-items-center rounded-2xl bg-foreground text-background">
-            <MailIcon className="size-6" />
-          </span>
-          <h1 className="font-heading text-lg font-medium">Connect Gmail</h1>
-          <p className="text-sm text-muted-foreground">
-            Link your Google account to read your inbox right inside loop.
-          </p>
-          <a href="/auth/google" className={buttonVariants()}>
-            Connect Google
-          </a>
-        </div>
+      <div className="flex h-svh w-full overflow-hidden bg-muted/40">
+        <main className="grid min-w-0 flex-1 place-items-center p-8 text-center">
+          <div className="max-w-sm space-y-3">
+            <span className="mx-auto grid size-12 place-items-center rounded-2xl bg-foreground text-background">
+              <MailIcon className="size-6" />
+            </span>
+            <h1 className="font-heading text-lg font-medium">Connect Gmail</h1>
+            <p className="text-sm text-muted-foreground">
+              Link your Google account to read your inbox right inside loop.
+              The assistant can still work with your calendar and documents.
+            </p>
+            <a href="/auth/google" className={buttonVariants()}>
+              Connect Google
+            </a>
+          </div>
+        </main>
+        <MailCopilotPanel />
       </div>
     )
   }
@@ -222,6 +248,11 @@ export function MailView() {
             {error && (
               <p className="border-b border-border/60 bg-destructive/10 px-4 py-2 text-xs text-destructive">
                 {error}
+              </p>
+            )}
+            {openError && (
+              <p className="border-b border-border/60 bg-destructive/10 px-4 py-2 text-xs text-destructive">
+                {openError}
               </p>
             )}
 
