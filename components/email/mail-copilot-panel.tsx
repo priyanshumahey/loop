@@ -1,6 +1,6 @@
 'use client'
 
-import { CalendarDaysIcon, MailIcon } from 'lucide-react'
+import { CalendarDaysIcon } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -12,7 +12,7 @@ import {
 import { AgentTabs } from '@/components/cal/agent/agent-tabs'
 import { CalAgent, type ContextEmail } from '@/components/cal/cal-agent'
 import { MailCalendarPanel } from '@/components/email/mail-calendar-panel'
-import { FollowUpSuggestions } from '@/components/agent'
+import { StarterPromptList } from '@/components/agent'
 import { LoopMark } from '@/components/loop-logo'
 import type { AgentEmail } from '@/lib/cal-agent/tools'
 import { useAgentConversations } from '@/hooks/use-agent-conversations'
@@ -78,19 +78,18 @@ const SUGGESTIONS = [
 function MailBriefing({ onAsk }: { onAsk: (text: string) => void }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-      <span className="grid size-11 place-items-center rounded-card bg-ink text-canvas shadow-card">
-        <MailIcon className="size-5" />
+      <span className="grid size-10 place-items-center rounded-card bg-ink text-canvas shadow-card">
+        <LoopMark className="h-5 w-[17px]" />
       </span>
-      <div className="space-y-1">
-        <h2 className="font-heading text-base font-medium">Loop assistant</h2>
-        <p className="text-[13px] text-muted-foreground">
+      <div>
+        <p className="text-sm font-medium text-foreground">Ask Loop</p>
+        <p className="mt-1 text-[13px] text-muted-foreground">
           Work across your inbox, calendar, and documents from one conversation.
         </p>
       </div>
-      <FollowUpSuggestions
+      <StarterPromptList
         items={SUGGESTIONS}
         onPick={onAsk}
-        className="mx-0 max-w-xs px-0 pt-0 pb-0"
       />
     </div>
   )

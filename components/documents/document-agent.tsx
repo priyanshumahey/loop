@@ -8,7 +8,6 @@ import {
   type UIMessage,
 } from "ai"
 import {
-  ArrowRightIcon,
   CalendarIcon,
   CheckIcon,
   CopyIcon,
@@ -39,6 +38,7 @@ import {
   AgentContextCard,
   FollowUpSuggestions,
   PromptBar,
+  StarterPromptList,
 } from "@/components/agent"
 import { AgentTabs } from "@/components/cal/agent/agent-tabs"
 import {
@@ -723,19 +723,11 @@ function WriterEmptyState({
           ? "Write with context from this document, your inbox, and your calendar."
           : "Create, find, and shape documents with email and calendar context."}
       </p>
-      <div className="mt-5 w-full max-w-72 overflow-hidden rounded-card bg-surface text-left shadow-hairline">
-        {prompts.map((prompt) => (
-          <button
-            key={prompt}
-            type="button"
-            onClick={() => onPick(prompt)}
-            className="flex min-h-10 w-full items-center gap-2 border-b border-line px-3 py-2 text-left text-[12px] leading-snug text-ink-2 transition-colors last:border-b-0 hover:bg-hover hover:text-ink"
-          >
-            <span className="min-w-0 flex-1">{prompt}</span>
-            <ArrowRightIcon className="size-3.5 shrink-0 text-ink-3" />
-          </button>
-        ))}
-      </div>
+      <StarterPromptList
+        items={prompts}
+        onPick={onPick}
+        className="mt-5"
+      />
     </div>
   )
 }

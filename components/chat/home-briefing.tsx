@@ -22,8 +22,8 @@ import type { CalendarEvent, EventColor } from "@/components/event-calendar/type
 import {
   AgentCard,
   AgentNotice,
-  FollowUpSuggestions,
   LoadingState,
+  StarterPromptList,
 } from "@/components/agent"
 import { syncEvents } from "@/lib/api/events"
 import { cn } from "@/lib/utils"
@@ -207,10 +207,9 @@ export function HomeBriefing({ onAsk }: { onAsk: (text: string) => void }) {
               <SparklesIcon className="size-3" />
               Ask the assistant
             </div>
-            <FollowUpSuggestions
+            <StarterPromptList
               items={SUGGESTIONS}
               onPick={onAsk}
-              className="mx-0 max-w-none px-0 pt-0 pb-0"
             />
           </div>
 

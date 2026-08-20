@@ -47,6 +47,7 @@ import {
   AgentNotice,
   FollowUpSuggestions,
   LoadingState,
+  StarterPromptList,
 } from "@/components/agent"
 import { AgendaList } from "@/components/cal/agent/agenda-list"
 import { AvailabilityCheck } from "@/components/cal/agent/availability-check"
@@ -717,9 +718,7 @@ export function CalAgent({
       >
         {isEmpty ? (
           renderEmptyState ? (
-            <div className="mx-auto w-full max-w-2xl px-4 py-6">
-              {renderEmptyState((text) => sendMessage({ text }))}
-            </div>
+            renderEmptyState((text) => sendMessage({ text }))
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
               <span className="grid size-10 place-items-center rounded-card bg-ink text-canvas shadow-card">
@@ -733,10 +732,9 @@ export function CalAgent({
                   Work across your calendar, inbox, and documents.
                 </p>
               </div>
-              <FollowUpSuggestions
+              <StarterPromptList
                 items={SUGGESTIONS}
                 onPick={(text) => sendMessage({ text })}
-                className="mx-0 max-w-full px-0 pt-0 pb-0"
               />
             </div>
           )

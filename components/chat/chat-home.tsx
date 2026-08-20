@@ -29,7 +29,11 @@ export function ChatHome({ initialChatId }: { initialChatId?: string }) {
             initialMessages={store.activeConversation?.messages}
             onPersist={store.persist}
             onNewChat={store.newChat}
-            renderEmptyState={(onAsk) => <HomeBriefing onAsk={onAsk} />}
+            renderEmptyState={(onAsk) => (
+              <div className="mx-auto w-full max-w-2xl px-4 py-6">
+                <HomeBriefing onAsk={onAsk} />
+              </div>
+            )}
           />
         </div>
       </main>
