@@ -1,6 +1,6 @@
 "use client"
 
-import { ChevronDownIcon, XIcon } from "lucide-react"
+import { ArrowRightIcon, ChevronDownIcon, XIcon } from "lucide-react"
 import type { ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
@@ -206,6 +206,39 @@ export function AgentDisclosure({
       </summary>
       <div className="border-t border-line bg-surface">{children}</div>
     </details>
+  )
+}
+
+export function StarterPromptList({
+  items,
+  onPick,
+  className,
+}: {
+  items: string[]
+  onPick: (text: string) => void
+  className?: string
+}) {
+  if (!items.length) return null
+
+  return (
+    <div
+      className={cn(
+        "w-full max-w-72 overflow-hidden rounded-card bg-surface text-left shadow-hairline",
+        className
+      )}
+    >
+      {items.map((prompt) => (
+        <button
+          key={prompt}
+          type="button"
+          onClick={() => onPick(prompt)}
+          className="flex min-h-10 w-full items-center gap-2 border-b border-line px-3 py-2 text-left text-[12px] leading-snug text-ink-2 transition-colors last:border-b-0 hover:bg-hover hover:text-ink"
+        >
+          <span className="min-w-0 flex-1">{prompt}</span>
+          <ArrowRightIcon className="size-3.5 shrink-0 text-ink-3" />
+        </button>
+      ))}
+    </div>
   )
 }
 

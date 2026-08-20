@@ -8,4 +8,5 @@ export {
 	AgentDisclosure,
 	AgentNotice,
 	FollowUpSuggestions,
+	StarterPromptList,
 } from "./primitives"
