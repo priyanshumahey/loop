@@ -319,7 +319,7 @@ function CalendarContent({
                 {zoomPercentage !== 100 && (
                   <button
                     onClick={resetScale}
-                    className="absolute bottom-4 right-4 z-50 bg-popover text-popover-foreground shadow-lg rounded-md px-3 py-1.5 text-xs font-medium border border-border hover:bg-accent transition-colors"
+                    className="absolute bottom-4 left-4 z-50 bg-popover text-popover-foreground shadow-lg rounded-md px-3 py-1.5 text-xs font-medium border border-border hover:bg-accent transition-colors"
                     title="Click to reset zoom"
                   >
                     {zoomPercentage}%
@@ -339,7 +339,7 @@ function CalendarContent({
                 {zoomPercentage !== 100 && (
                   <button
                     onClick={resetScale}
-                    className="absolute bottom-4 right-4 z-50 bg-popover text-popover-foreground shadow-lg rounded-md px-3 py-1.5 text-xs font-medium border border-border hover:bg-accent transition-colors"
+                    className="absolute bottom-4 left-4 z-50 bg-popover text-popover-foreground shadow-lg rounded-md px-3 py-1.5 text-xs font-medium border border-border hover:bg-accent transition-colors"
                     title="Click to reset zoom"
                   >
                     {zoomPercentage}%
