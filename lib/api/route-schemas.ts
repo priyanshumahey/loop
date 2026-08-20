@@ -1,4 +1,19 @@
 import { z } from "zod"
+import type { Value } from "platejs"
+
+/** A persisted Plate document: top-level element nodes with nested descendants. */
+export const plateValueSchema = z
+  .array(
+    z
+      .object({
+        type: z.string().min(1),
+        children: z.array(z.unknown()),
+      })
+      .loose()
+  )
+  .min(1)
+  .max(10_000)
+  .transform((value) => value as Value)
 
 /** An ISO-8601 datetime carrying an explicit offset, parsed to a `Date`. */
 export const isoDateTimeSchema = z.iso
@@ -49,6 +64,7 @@ export const timeZoneSchema = z
  */
 export function serviceErrorStatus(error: string): number {
   if (error === "Unauthorized") return 401
+  if (error === "Forbidden") return 403
   if (error.includes("duplicate key")) return 409
   return 400
 }
