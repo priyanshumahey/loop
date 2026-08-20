@@ -8,7 +8,7 @@ import { UserAccount } from "@/components/user-account"
 import { ViewSwitcher } from "@/components/view-switcher"
 import { usePersistentState } from "@/hooks/use-persistent-state"
 
-type SurfaceKey = "chat" | "calendar" | "mail"
+type SurfaceKey = "chat" | "calendar" | "mail" | "documents"
 
 /**
  * A single shared collapse key (rather than one per surface) so the sidebar's

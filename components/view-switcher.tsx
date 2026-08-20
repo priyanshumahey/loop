@@ -1,20 +1,33 @@
 "use client"
 
-import { CalendarIcon, MailIcon, SparklesIcon } from "lucide-react"
+import { CalendarIcon, FileTextIcon, MailIcon, SparklesIcon } from "lucide-react"
 import Link from "next/link"
 
 import { cn } from "@/lib/utils"
 
-type ViewKey = "chat" | "calendar" | "mail"
+type ViewKey = "chat" | "calendar" | "mail" | "documents"
 
-const VIEWS: { key: ViewKey; href: string; label: string; icon: typeof MailIcon }[] = [
+const VIEWS: {
+  key: ViewKey
+  href: string
+  label: string
+  compactLabel?: string
+  icon: typeof MailIcon
+}[] = [
   { key: "chat", href: "/home", label: "Chat", icon: SparklesIcon },
-  { key: "calendar", href: "/cal", label: "Calendar", icon: CalendarIcon },
+  {
+    key: "calendar",
+    href: "/cal",
+    label: "Calendar",
+    compactLabel: "Cal",
+    icon: CalendarIcon,
+  },
   { key: "mail", href: "/mail", label: "Mail", icon: MailIcon },
+  { key: "documents", href: "/documents", label: "Docs", icon: FileTextIcon },
 ]
 
 /**
- * The Chat / Calendar / Mail switcher shared across every surface's sidebar so
+ * The shared surface switcher rendered in every sidebar so
  * navigation looks and behaves identically everywhere. The active view renders
  * as a non-interactive raised pill; the others are links.
  */
@@ -54,25 +67,27 @@ export function ViewSwitcher({
 
   return (
     <div className="flex items-center gap-1 rounded-xl bg-muted/70 p-1">
-      {VIEWS.map(({ key, href, label, icon: Icon }) => {
+      {VIEWS.map(({ key, href, label, compactLabel, icon: Icon }) => {
         const base =
-          "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium transition-colors"
+          "flex min-w-0 flex-1 items-center justify-center gap-0.5 rounded-lg px-0.5 py-1.5 text-[12px] font-medium transition-colors"
         return key === active ? (
           <span
             key={key}
+            aria-label={label}
             className={cn(base, "bg-background text-foreground shadow-sm")}
           >
-            <Icon className="size-3.5" />
-            {label}
+            <Icon className="size-3.5 shrink-0" />
+            <span className="truncate">{compactLabel ?? label}</span>
           </span>
         ) : (
           <Link
             key={key}
             href={href}
+            aria-label={label}
             className={cn(base, "text-muted-foreground hover:text-foreground")}
           >
-            <Icon className="size-3.5" />
-            {label}
+            <Icon className="size-3.5 shrink-0" />
+            <span className="truncate">{compactLabel ?? label}</span>
           </Link>
         )
       })}
