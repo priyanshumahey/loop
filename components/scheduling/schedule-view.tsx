@@ -59,39 +59,41 @@ interface Selection {
   action: AvailabilityRangeAction
 }
 
+// Fill and text follow the same ramp as getEventColorClasses in the main
+// calendar; the border is what distinguishes an availability block from an event.
 const TARGET_COLOR: Record<
   SchedulingColor,
   { dot: string; block: string; text: string }
 > = {
   sky: {
     dot: "bg-sky-400",
-    block: "border-sky-500/40 bg-sky-400/25",
-    text: "text-sky-900 dark:text-sky-100",
+    block: "border-sky-500/40 bg-sky-200/50 dark:bg-sky-400/25",
+    text: "text-sky-950/80 dark:text-sky-200",
   },
   amber: {
     dot: "bg-amber-400",
-    block: "border-amber-500/40 bg-amber-400/25",
-    text: "text-amber-900 dark:text-amber-100",
+    block: "border-amber-500/40 bg-amber-200/50 dark:bg-amber-400/25",
+    text: "text-amber-950/80 dark:text-amber-200",
   },
   violet: {
     dot: "bg-violet-400",
-    block: "border-violet-500/40 bg-violet-400/25",
-    text: "text-violet-900 dark:text-violet-100",
+    block: "border-violet-500/40 bg-violet-200/50 dark:bg-violet-400/25",
+    text: "text-violet-950/80 dark:text-violet-200",
   },
   rose: {
     dot: "bg-rose-400",
-    block: "border-rose-500/40 bg-rose-400/25",
-    text: "text-rose-900 dark:text-rose-100",
+    block: "border-rose-500/40 bg-rose-200/50 dark:bg-rose-400/25",
+    text: "text-rose-950/80 dark:text-rose-200",
   },
   emerald: {
     dot: "bg-emerald-400",
-    block: "border-emerald-500/40 bg-emerald-400/25",
-    text: "text-emerald-900 dark:text-emerald-100",
+    block: "border-emerald-500/40 bg-emerald-200/50 dark:bg-emerald-400/25",
+    text: "text-emerald-950/80 dark:text-emerald-200",
   },
   orange: {
     dot: "bg-orange-400",
-    block: "border-orange-500/40 bg-orange-400/25",
-    text: "text-orange-900 dark:text-orange-100",
+    block: "border-orange-500/40 bg-orange-200/50 dark:bg-orange-400/25",
+    text: "text-orange-950/80 dark:text-orange-200",
   },
 }
 
@@ -208,16 +210,20 @@ function ScheduleGrid({
       }
     : null
 
+  // Drives the drag toggle direction. With no meeting type targeted the drag
+  // acts on everything, so any overlapping range counts as open; otherwise a
+  // shared opening covers the targeted type the same way the resolver treats it.
   const isOpen = useCallback(
     (start: Date, end: Date) =>
-      (targetEventTypeIds.length === 0 ? [null] : targetEventTypeIds).every(
-        (eventTypeId) =>
-          slots.some(
-            (slot) =>
-              slot.eventTypeId === eventTypeId &&
-              overlaps(start, end, slot.start, slot.end)
-          )
-      ),
+      targetEventTypeIds.length === 0
+        ? slots.some((slot) => overlaps(start, end, slot.start, slot.end))
+        : targetEventTypeIds.every((eventTypeId) =>
+            slots.some(
+              (slot) =>
+                (slot.eventTypeId === eventTypeId || slot.eventTypeId === null) &&
+                overlaps(start, end, slot.start, slot.end)
+            )
+          ),
     [slots, targetEventTypeIds]
   )
 
@@ -409,7 +415,7 @@ function ScheduleGrid({
           </div>
           {days.map((day) => (
             <div
-              className="py-2 text-center text-xs text-muted-foreground data-today:font-semibold data-today:text-emerald-700 sm:text-sm dark:data-today:text-emerald-400"
+              className="py-2 text-center text-xs text-muted-foreground data-today:font-semibold data-today:text-sky-600 sm:text-sm dark:data-today:text-sky-400"
               data-today={isToday(day) || undefined}
               key={day.toISOString()}
             >
@@ -441,7 +447,7 @@ function ScheduleGrid({
             <div
               className={cn(
                 "relative border-r border-border/70 last:border-r-0",
-                isToday(day) && "bg-emerald-50/40 dark:bg-emerald-950/10"
+                isToday(day) && "bg-sky-100/50 dark:bg-sky-900/20"
               )}
               key={day.toISOString()}
             >

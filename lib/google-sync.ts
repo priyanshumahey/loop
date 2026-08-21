@@ -5,6 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { decrypt, encrypt } from '@/lib/encryption'
 import {
   copyCalendarEventResource,
+  deleteBookingCalendarEvent,
   deleteCalendarEvent,
   getCalendarEvent,
   getGmailAttachment,
@@ -16,6 +17,10 @@ import {
   listGmailMessages,
   patchCalendarEvent,
   patchCalendarEventRecurrence,
+  rescheduleBookingCalendarEvent,
+  upsertBookingCalendarEvent,
+  type BookingGoogleEvent,
+  type BookingGoogleEventInput,
   type CalendarTokens,
   type GmailMessage,
   type GoogleEventInput,
@@ -411,6 +416,71 @@ export async function pushEventToGoogle(
   const { event, refreshed } = await insertCalendarEvent(tokens, input, DEFAULT_CALENDAR_ID)
   await saveRefreshed(db, userId, refreshed)
   return { googleEventId: event.googleEventId, etag: event.etag }
+}
+
+/** Idempotently project a durable Loop booking into Google Calendar. */
+export async function pushBookingToGoogle(
+  db: Db,
+  userId: string,
+  input: BookingGoogleEventInput
+): Promise<BookingGoogleEvent | null> {
+  const tokens = await getGoogleTokens(db, userId)
+  if (!tokens) return null
+
+  try {
+    const { event, refreshed } = await upsertBookingCalendarEvent(tokens, input)
+    await saveRefreshed(db, userId, refreshed)
+    return event
+  } catch (error) {
+    await disconnectRevokedGoogleCredentials(db, userId, error)
+    throw error
+  }
+}
+
+/** Idempotently remove a booking event from Google and notify attendees. */
+export async function removeBookingFromGoogle(
+  db: Db,
+  userId: string,
+  calendarId: string,
+  eventId: string
+): Promise<boolean> {
+  const tokens = await getGoogleTokens(db, userId)
+  if (!tokens) return false
+
+  try {
+    const { refreshed } = await deleteBookingCalendarEvent(
+      tokens,
+      calendarId,
+      eventId
+    )
+    await saveRefreshed(db, userId, refreshed)
+    return true
+  } catch (error) {
+    await disconnectRevokedGoogleCredentials(db, userId, error)
+    throw error
+  }
+}
+
+/** Move an existing provider event to a replacement booking. */
+export async function rescheduleBookingOnGoogle(
+  db: Db,
+  userId: string,
+  input: BookingGoogleEventInput
+): Promise<BookingGoogleEvent | null> {
+  const tokens = await getGoogleTokens(db, userId)
+  if (!tokens) return null
+
+  try {
+    const { event, refreshed } = await rescheduleBookingCalendarEvent(
+      tokens,
+      input
+    )
+    await saveRefreshed(db, userId, refreshed)
+    return event
+  } catch (error) {
+    await disconnectRevokedGoogleCredentials(db, userId, error)
+    throw error
+  }
 }
 
 /** Push an update for an existing google-linked event. Returns the new etag. */

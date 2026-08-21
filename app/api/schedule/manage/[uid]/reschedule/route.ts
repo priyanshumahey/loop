@@ -2,7 +2,7 @@ import { after, NextResponse, type NextRequest } from "next/server"
 import { z } from "zod"
 
 import { timeZoneSchema } from "@/lib/api/route-schemas"
-import { bookPublicSchedule } from "@/lib/db/scheduling"
+import { reschedulePublicBooking } from "@/lib/db/scheduling"
 import {
   BOOKING_COMMIT_MAX_AGE_SECONDS,
   bookingCollisionWindow,
@@ -12,21 +12,19 @@ import { processSchedulingOutbox } from "@/lib/scheduling/outbox"
 
 export const maxDuration = 60
 
-const bookingSchema = z.object({
+const inputSchema = z.object({
+  managementToken: z.string().min(32).max(256),
   start: z.iso.datetime({ offset: true }).transform((value) => new Date(value)),
-  guestName: z.string().trim().min(1).max(120),
-  guestEmail: z.email().max(320),
-  guestNotes: z.string().trim().max(1000).optional(),
+  requestId: z.uuid(),
   guestTimeZone: timeZoneSchema,
   guestLocale: z.string().trim().min(2).max(35).optional(),
-  requestId: z.uuid(),
 })
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ slug: string }> }
+  { params }: { params: Promise<{ uid: string }> }
 ) {
-  const { slug } = await params
+  const { uid } = await params
   let body: unknown
   try {
     body = await request.json()
@@ -34,26 +32,29 @@ export async function POST(
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
   }
 
-  const parsed = bookingSchema.safeParse(body)
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Valid booking details are required" }, { status: 400 })
+  const parsed = inputSchema.safeParse(body)
+  if (!z.uuid().safeParse(uid).success || !parsed.success) {
+    return NextResponse.json(
+      { error: "Valid rescheduling details are required" },
+      { status: 400 }
+    )
   }
 
   const collisionWindow = bookingCollisionWindow(parsed.data.start)
   await refreshHostAvailability({
-    slug,
+    bookingUid: uid,
     start: collisionWindow.start,
     end: collisionWindow.end,
     maxAgeSeconds: BOOKING_COMMIT_MAX_AGE_SECONDS,
   })
 
-  const result = await bookPublicSchedule({ slug, ...parsed.data })
+  const result = await reschedulePublicBooking({ uid, ...parsed.data })
   if (!result.success) {
     const status =
-      result.error === "This time is no longer available"
-        ? 409
-        : result.error === "Schedule not found"
-          ? 404
+      result.error === "Booking not found" || result.error === "Schedule not found"
+        ? 404
+        : result.error === "This time is no longer available"
+          ? 409
           : 400
     return NextResponse.json({ error: result.error }, { status })
   }
@@ -62,7 +63,7 @@ export async function POST(
     try {
       await processSchedulingOutbox({ limit: 1 })
     } catch (error) {
-      console.error("Failed to start booking provider sync", error)
+      console.error("Failed to start booking reschedule sync", error)
     }
   })
 

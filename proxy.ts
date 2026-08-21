@@ -7,6 +7,7 @@ export async function proxy(request: NextRequest) {
   if (
     pathname.startsWith('/schedule/') ||
     pathname.startsWith('/api/schedule/') ||
+    pathname === '/api/scheduling/jobs' ||
     pathname.startsWith('/shared/calendar/') ||
     pathname.startsWith('/shared/document/') ||
     pathname.startsWith('/api/calendar-shares/public/')

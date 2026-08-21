@@ -77,6 +77,30 @@ export type GoogleEventInput = {
   recurrence?: string[]
 }
 
+export type BookingGoogleEventInput = {
+  bookingUid: string
+  eventId: string
+  calendarId: string
+  title: string
+  description?: string | null
+  start: string
+  end: string
+  timezone: string
+  location?: string | null
+  attendees: { email: string; displayName?: string | null }[]
+  createGoogleMeet: boolean
+  conferenceRequestId: string
+}
+
+export type BookingGoogleEvent = {
+  eventId: string
+  etag: string | null
+  htmlLink: string | null
+  meetingUrl: string | null
+  conferenceId: string | null
+  conferenceStatus: string | null
+}
+
 type Result<T> = T & { refreshed?: RefreshedTokens }
 
 function makeClient(tokens: CalendarTokens) {
@@ -100,6 +124,221 @@ function makeClient(tokens: CalendarTokens) {
   return { client, captured }
 }
 
+function googleHttpStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined
+  const value = error as {
+    code?: unknown
+    response?: { status?: unknown }
+    cause?: unknown
+  }
+  if (typeof value.code === 'number') return value.code
+  if (typeof value.response?.status === 'number') return value.response.status
+  return googleHttpStatus(value.cause)
+}
+
+function bookingGoogleEvent(
+  resource: calendar_v3.Schema$Event,
+  fallbackEventId: string
+): BookingGoogleEvent {
+  const videoEntry = resource.conferenceData?.entryPoints?.find(
+    (entry) => entry.entryPointType === 'video'
+  )
+  return {
+    eventId: resource.id ?? fallbackEventId,
+    etag: resource.etag ?? null,
+    htmlLink: resource.htmlLink ?? null,
+    meetingUrl: resource.hangoutLink ?? videoEntry?.uri ?? null,
+    conferenceId: resource.conferenceData?.conferenceId ?? null,
+    conferenceStatus:
+      resource.conferenceData?.createRequest?.status?.statusCode ?? null,
+  }
+}
+
+/**
+ * Create a booking event exactly once. The caller-supplied Google event id is
+ * stable across retries, so a lost response cannot produce a second invite.
+ */
+export async function upsertBookingCalendarEvent(
+  tokens: CalendarTokens,
+  input: BookingGoogleEventInput
+): Promise<Result<{ event: BookingGoogleEvent }>> {
+  const { client, captured } = makeClient(tokens)
+  const calendar = google.calendar({ version: 'v3', auth: client })
+
+  const getExisting = () =>
+    calendar.events.get({
+      calendarId: input.calendarId,
+      eventId: input.eventId,
+    })
+
+  let resource: calendar_v3.Schema$Event
+  try {
+    resource = (await getExisting()).data
+  } catch (error) {
+    if (googleHttpStatus(error) !== 404) throw error
+
+    const requestBody: calendar_v3.Schema$Event = {
+      id: input.eventId,
+      summary: input.title,
+      description: input.description ?? undefined,
+      location: input.createGoogleMeet
+        ? undefined
+        : input.location ?? undefined,
+      start: { dateTime: input.start, timeZone: input.timezone },
+      end: { dateTime: input.end, timeZone: input.timezone },
+      attendees: input.attendees.map((attendee) => ({
+        email: attendee.email,
+        displayName: attendee.displayName ?? undefined,
+        responseStatus: 'needsAction',
+      })),
+      guestsCanInviteOthers: false,
+      extendedProperties: {
+        private: { loopBookingUid: input.bookingUid },
+      },
+      conferenceData: input.createGoogleMeet
+        ? {
+          createRequest: {
+            requestId: input.conferenceRequestId,
+            conferenceSolutionKey: { type: 'hangoutsMeet' },
+          },
+        }
+        : undefined,
+    }
+
+    try {
+      resource = (
+        await calendar.events.insert({
+          calendarId: input.calendarId,
+          conferenceDataVersion: 1,
+          sendUpdates: 'all',
+          requestBody,
+        })
+      ).data
+    } catch (insertError) {
+      if (googleHttpStatus(insertError) !== 409) throw insertError
+      resource = (await getExisting()).data
+    }
+  }
+
+  const conferenceState =
+    resource.conferenceData?.createRequest?.status?.statusCode
+  if (
+    input.createGoogleMeet &&
+    (!resource.conferenceData || conferenceState === 'failure')
+  ) {
+    resource = (
+      await calendar.events.patch({
+        calendarId: input.calendarId,
+        eventId: input.eventId,
+        conferenceDataVersion: 1,
+        sendUpdates: 'none',
+        requestBody: {
+          conferenceData: {
+            createRequest: {
+              requestId: input.conferenceRequestId,
+              conferenceSolutionKey: { type: 'hangoutsMeet' },
+            },
+          },
+        },
+      })
+    ).data
+  }
+
+  return {
+    event: bookingGoogleEvent(resource, input.eventId),
+    refreshed: captured.refreshed,
+  }
+}
+
+/** Move an existing booking event while preserving its provider identity. */
+export async function rescheduleBookingCalendarEvent(
+  tokens: CalendarTokens,
+  input: BookingGoogleEventInput
+): Promise<Result<{ event: BookingGoogleEvent }>> {
+  const { client, captured } = makeClient(tokens)
+  const calendar = google.calendar({ version: 'v3', auth: client })
+
+  let existing: calendar_v3.Schema$Event
+  try {
+    existing = (
+      await calendar.events.get({
+        calendarId: input.calendarId,
+        eventId: input.eventId,
+      })
+    ).data
+  } catch (error) {
+    if (googleHttpStatus(error) !== 404) throw error
+    return upsertBookingCalendarEvent(tokens, input)
+  }
+
+  const existingConferenceState =
+    existing.conferenceData?.createRequest?.status?.statusCode
+  const resource = (
+    await calendar.events.patch({
+      calendarId: input.calendarId,
+      eventId: input.eventId,
+      conferenceDataVersion: 1,
+      sendUpdates: 'all',
+      requestBody: {
+        summary: input.title,
+        description: input.description ?? undefined,
+        location: input.createGoogleMeet
+          ? undefined
+          : input.location ?? undefined,
+        start: { dateTime: input.start, timeZone: input.timezone },
+        end: { dateTime: input.end, timeZone: input.timezone },
+        attendees: input.attendees.map((attendee) => ({
+          email: attendee.email,
+          displayName: attendee.displayName ?? undefined,
+          responseStatus: 'needsAction',
+        })),
+        guestsCanInviteOthers: false,
+        extendedProperties: {
+          private: { loopBookingUid: input.bookingUid },
+        },
+        conferenceData:
+          input.createGoogleMeet &&
+            (!existing.conferenceData || existingConferenceState === 'failure')
+            ? {
+              createRequest: {
+                requestId: input.conferenceRequestId,
+                conferenceSolutionKey: { type: 'hangoutsMeet' },
+              },
+            }
+            : undefined,
+      },
+    })
+  ).data
+
+  return {
+    event: bookingGoogleEvent(resource, input.eventId),
+    refreshed: captured.refreshed,
+  }
+}
+
+/** Delete a booking event and notify guests; retries treat an absent event as done. */
+export async function deleteBookingCalendarEvent(
+  tokens: CalendarTokens,
+  calendarId: string,
+  eventId: string
+): Promise<Result<Record<never, never>>> {
+  const { client, captured } = makeClient(tokens)
+  const calendar = google.calendar({ version: 'v3', auth: client })
+
+  try {
+    await calendar.events.delete({
+      calendarId,
+      eventId,
+      sendUpdates: 'all',
+    })
+  } catch (error) {
+    const status = googleHttpStatus(error)
+    if (status !== 404 && status !== 410) throw error
+  }
+
+  return { refreshed: captured.refreshed }
+}
+
 function mapGoogleEvent(
   e: calendar_v3.Schema$Event,
   calendarTimeZone = 'UTC'
@@ -119,9 +358,9 @@ function mapGoogleEvent(
       : null
     end = e.end?.date
       ? calendarDateToUtc(
-          addCalendarDays(e.end.date, -1),
-          timeZone
-        ).toISOString()
+        addCalendarDays(e.end.date, -1),
+        timeZone
+      ).toISOString()
       : null
   }
 

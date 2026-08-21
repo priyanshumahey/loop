@@ -2,6 +2,7 @@
 
 import {
   CalendarClockIcon,
+  CalendarCheckIcon,
   CheckIcon,
   ClockIcon,
   CopyIcon,
@@ -13,6 +14,7 @@ import {
 import { useState } from "react"
 
 import { MeetingTypeDialog } from "@/components/scheduling/meeting-type-dialog"
+import { BookingsPanel } from "@/components/scheduling/bookings-panel"
 import type {
   SchedulingColor,
   SchedulingEventType,
@@ -20,6 +22,7 @@ import type {
 import { Button } from "@/components/ui/button"
 import type { EventTypeInput } from "@/lib/api/scheduling"
 import { useSchedulingEventTypes } from "@/hooks/use-scheduling-event-types"
+import { useSchedulingBookings } from "@/hooks/use-scheduling-bookings"
 import { formatDuration } from "@/components/scheduling/utils"
 import { cn } from "@/lib/utils"
 
@@ -45,6 +48,14 @@ function toEventTypeInput(eventType: SchedulingEventType): EventTypeInput {
     bookingWindowDays: eventType.bookingWindowDays,
     slotIncrementMinutes: eventType.slotIncrementMinutes,
     location: eventType.location,
+    locations: eventType.locations,
+    bookingFields: eventType.bookingFields,
+    requiresConfirmation: eventType.requiresConfirmation,
+    disableCancelling: eventType.disableCancelling,
+    disableRescheduling: eventType.disableRescheduling,
+    minimumRescheduleNoticeMinutes: eventType.minimumRescheduleNoticeMinutes,
+    destinationCalendarId: eventType.destinationCalendarId,
+    successRedirectUrl: eventType.successRedirectUrl,
     color: eventType.color,
     active: eventType.active,
     timezone: eventType.timezone,
@@ -242,7 +253,7 @@ function EmptyState({
 }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-      <span className="grid size-11 place-items-center rounded-xl border border-border/70 bg-muted/40 text-muted-foreground">
+      <span className="grid size-10 place-items-center rounded-xl border border-border/70 bg-muted/40 text-muted-foreground">
         <CalendarClockIcon className="size-5" />
       </span>
       <h3 className="mt-3 text-sm font-semibold">No booking pages yet</h3>
@@ -276,10 +287,15 @@ export function SchedulingSetupPanel({
   onSelectAvailabilityTarget: (id: string) => void
 }) {
   const { eventTypes, isLoading, isSaving, error, save, remove } = scheduling
+  const bookings = useSchedulingBookings()
+  const [view, setView] = useState<"types" | "bookings">("types")
 
   const activeCount = eventTypes.filter((eventType) => eventType.active).length
   const activeTypes = eventTypes.filter((eventType) => eventType.active)
   const pausedTypes = eventTypes.filter((eventType) => !eventType.active)
+  const pendingCount = bookings.bookings.filter(
+    (booking) => booking.status === "pending"
+  ).length
 
   const handleSave: typeof save = async (input) => {
     return save(input)
@@ -298,6 +314,46 @@ export function SchedulingSetupPanel({
 
   return (
     <aside className="flex max-h-[46%] w-full shrink-0 flex-col border-t border-border/70 bg-muted/20 lg:h-full lg:max-h-none lg:w-[320px] lg:border-t-0 lg:border-l">
+      <div className="border-b border-border/70 px-3 py-3">
+        <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
+          <button
+            className={cn(
+              "flex h-7 items-center justify-center gap-1.5 rounded-md text-xs font-medium transition-colors",
+              view === "types"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground"
+            )}
+            onClick={() => setView("types")}
+            type="button"
+          >
+            <CalendarClockIcon className="size-3.5" />
+            Meeting types
+          </button>
+          <button
+            className={cn(
+              "flex h-7 items-center justify-center gap-1.5 rounded-md text-xs font-medium transition-colors",
+              view === "bookings"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground"
+            )}
+            onClick={() => setView("bookings")}
+            type="button"
+          >
+            <CalendarCheckIcon className="size-3.5" />
+            Bookings
+            {pendingCount > 0 && (
+              <span className="rounded-full bg-amber-500/15 px-1.5 text-[9px] font-semibold text-amber-600 dark:text-amber-400">
+                {pendingCount}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {view === "bookings" ? (
+        <BookingsPanel bookingsState={bookings} />
+      ) : (
+        <>
       <div className="flex items-center justify-between gap-2 border-b border-border/70 px-4 py-3">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold">Meeting types</h2>
@@ -379,6 +435,8 @@ export function SchedulingSetupPanel({
             </section>
           )}
         </div>
+      )}
+        </>
       )}
     </aside>
   )

@@ -4,25 +4,48 @@ import { notFound } from "next/navigation"
 
 import { LoopMark } from "@/components/loop-logo"
 import { BookingForm } from "@/components/scheduling/booking-form"
-import { getPublicEventType } from "@/lib/db/scheduling"
+import { getPublicBooking, getPublicEventType } from "@/lib/db/scheduling"
 
 // Booking links are shared directly with invitees, not published.
 export const metadata: Metadata = {
   title: "Book a time · Loop",
   robots: { index: false, follow: false },
+  referrer: "no-referrer",
 }
 
 export default async function PublicSchedulePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>
+  searchParams: Promise<{ reschedule?: string; token?: string }>
 }) {
-  const { slug } = await params
+  const [{ slug }, query] = await Promise.all([params, searchParams])
   const result = await getPublicEventType(slug)
   if (!result.success) throw new Error("Unable to load this booking page")
   if (!result.data) notFound()
 
   const eventType = result.data
+  let rescheduling:
+    | { bookingUid: string; managementToken: string; currentStart: Date }
+    | undefined
+  if (query.reschedule || query.token) {
+    if (!query.reschedule || !query.token) notFound()
+    const booking = await getPublicBooking(query.reschedule, query.token)
+    if (
+      !booking.success ||
+      !booking.data ||
+      !booking.data.canReschedule ||
+      booking.data.eventTypeSlug !== slug
+    ) {
+      notFound()
+    }
+    rescheduling = {
+      bookingUid: booking.data.bookingUid,
+      managementToken: query.token,
+      currentStart: booking.data.start,
+    }
+  }
 
   return (
     <main className="min-h-svh bg-[radial-gradient(circle_at_top_left,color-mix(in_oklch,var(--muted),transparent_15%),transparent_42%),linear-gradient(to_bottom,var(--background),color-mix(in_oklch,var(--muted),var(--background)_70%))] px-4 py-8 sm:px-6 sm:py-12">
@@ -61,7 +84,7 @@ export default async function PublicSchedulePage({
               </span>
             </div>
           </header>
-          <BookingForm eventType={eventType} />
+          <BookingForm eventType={eventType} rescheduling={rescheduling} />
         </section>
       </div>
     </main>

@@ -1,11 +1,20 @@
 "use client"
 
-import { ChevronDownIcon, LinkIcon, Trash2Icon, VideoIcon } from "lucide-react"
+import {
+  ChevronDownIcon,
+  Link2Icon,
+  LinkIcon,
+  MapPinIcon,
+  PhoneIcon,
+  Trash2Icon,
+  VideoIcon,
+} from "lucide-react"
 import { useEffect, useState, type ReactNode } from "react"
 
 import type {
   SchedulingColor,
   SchedulingEventType,
+  SchedulingLocation,
   WeeklyAvailabilityRule,
 } from "@/components/scheduling/types"
 import { Button } from "@/components/ui/button"
@@ -72,8 +81,25 @@ const COLORS: { value: SchedulingColor; swatch: string }[] = [
   { value: "rose", swatch: "bg-rose-400" },
 ]
 
-// Only Google Meet is supported for now.
-const MEET_LOCATION = "Google Meet"
+const LOCATION_OPTIONS: {
+  value: SchedulingLocation["type"]
+  label: string
+  icon: typeof VideoIcon
+}[] = [
+  { value: "google_meet", label: "Google Meet", icon: VideoIcon },
+  { value: "link", label: "Link", icon: Link2Icon },
+  { value: "phone", label: "Phone", icon: PhoneIcon },
+  { value: "in_person", label: "In person", icon: MapPinIcon },
+]
+
+const LOCATION_PLACEHOLDER: Record<
+  Exclude<SchedulingLocation["type"], "google_meet">,
+  string
+> = {
+  link: "https://meet.example.com/room",
+  phone: "+1 555 010 1234",
+  in_person: "Office or meeting address",
+}
 
 function SectionLabel({ children }: { children: ReactNode }) {
   return (
@@ -234,6 +260,22 @@ function MeetingTypeForm({
   const [slotIncrementMinutes, setSlotIncrementMinutes] = useState(
     initial?.slotIncrementMinutes ?? 15
   )
+  const initialLocation = initial?.locations[0] ?? {
+    type: "google_meet" as const,
+  }
+  const [locationType, setLocationType] = useState(initialLocation.type)
+  const [locationValue, setLocationValue] = useState(initialLocation.value ?? "")
+  const [requiresConfirmation, setRequiresConfirmation] = useState(
+    initial?.requiresConfirmation ?? false
+  )
+  const [disableCancelling, setDisableCancelling] = useState(
+    initial?.disableCancelling ?? false
+  )
+  const [disableRescheduling, setDisableRescheduling] = useState(
+    initial?.disableRescheduling ?? false
+  )
+  const [minimumRescheduleNoticeMinutes, setMinimumRescheduleNoticeMinutes] =
+    useState(initial?.minimumRescheduleNoticeMinutes ?? 0)
   const [color, setColor] = useState<SchedulingColor>(
     initial?.color ?? "emerald"
   )
@@ -276,6 +318,15 @@ function MeetingTypeForm({
           setValidationError("The booking link needs at least 3 characters.")
           return
         }
+        if (locationType !== "google_meet" && !locationValue.trim()) {
+          setValidationError("Add the meeting location details.")
+          return
+        }
+        const locations: SchedulingLocation[] = [
+          locationType === "google_meet"
+            ? { type: "google_meet" }
+            : { type: locationType, value: locationValue.trim() },
+        ]
         setValidationError(null)
         void onSave({
           id: initial?.id,
@@ -288,7 +339,18 @@ function MeetingTypeForm({
           minNoticeMinutes,
           bookingWindowDays,
           slotIncrementMinutes,
-          location: MEET_LOCATION,
+          location:
+            locationType === "google_meet"
+              ? "Google Meet"
+              : locationValue.trim(),
+          locations,
+          bookingFields: initial?.bookingFields ?? [],
+          requiresConfirmation,
+          disableCancelling,
+          disableRescheduling,
+          minimumRescheduleNoticeMinutes,
+          destinationCalendarId: initial?.destinationCalendarId ?? "primary",
+          successRedirectUrl: initial?.successRedirectUrl ?? null,
           color,
           active,
           timezone,
@@ -344,13 +406,43 @@ function MeetingTypeForm({
 
             <div className="flex flex-col gap-1.5">
               <Label>Location</Label>
-              <div className="flex items-center gap-2 rounded-lg border border-input bg-muted/30 px-2.5 py-2 text-sm">
-                <VideoIcon className="size-4 text-muted-foreground" />
-                <span className="font-medium">Google Meet</span>
-                <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-                  Default
-                </span>
+              <div className="grid grid-cols-2 gap-1.5">
+                {LOCATION_OPTIONS.map((option) => {
+                  const Icon = option.icon
+                  return (
+                    <button
+                      aria-pressed={locationType === option.value}
+                      className={cn(
+                        "flex h-8 items-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition-colors",
+                        locationType === option.value
+                          ? "border-foreground bg-foreground text-background"
+                          : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+                      )}
+                      key={option.value}
+                      onClick={() => setLocationType(option.value)}
+                      type="button"
+                    >
+                      <Icon className="size-3.5" />
+                      {option.label}
+                    </button>
+                  )
+                })}
               </div>
+              {locationType !== "google_meet" && (
+                <Input
+                  aria-label="Location details"
+                  onChange={(event) => setLocationValue(event.target.value)}
+                  placeholder={LOCATION_PLACEHOLDER[locationType]}
+                  type={
+                    locationType === "link"
+                      ? "url"
+                      : locationType === "phone"
+                        ? "tel"
+                        : "text"
+                  }
+                  value={locationValue}
+                />
+              )}
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -581,6 +673,79 @@ function MeetingTypeForm({
             })}
           </div>
         </div>
+
+        <div className="grid gap-3 border-t border-border/60 pt-5 sm:grid-cols-2">
+          <label className="flex items-start gap-2.5 rounded-lg border border-border/70 px-3 py-2.5">
+            <input
+              checked={!disableCancelling}
+              className="mt-0.5 size-3.5 accent-foreground"
+              onChange={(event) => setDisableCancelling(!event.target.checked)}
+              type="checkbox"
+            />
+            <span>
+              <span className="block text-sm font-medium">Guest cancellation</span>
+              <span className="block text-xs text-muted-foreground">
+                Let guests cancel from their management link.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2.5 rounded-lg border border-border/70 px-3 py-2.5">
+            <input
+              checked={!disableRescheduling}
+              className="mt-0.5 size-3.5 accent-foreground"
+              onChange={(event) => setDisableRescheduling(!event.target.checked)}
+              type="checkbox"
+            />
+            <span>
+              <span className="block text-sm font-medium">Guest rescheduling</span>
+              <span className="block text-xs text-muted-foreground">
+                Keep the booking history when guests choose a new time.
+              </span>
+            </span>
+          </label>
+        </div>
+
+        {!disableRescheduling && (
+          <label className="flex items-center justify-between gap-4 rounded-lg border border-border/70 px-3 py-2.5">
+            <span className="text-sm font-medium">Reschedule notice</span>
+            <div className="w-40">
+              <NativeSelect
+                onChange={setMinimumRescheduleNoticeMinutes}
+                options={MIN_NOTICE_OPTIONS}
+                value={minimumRescheduleNoticeMinutes}
+              />
+            </div>
+          </label>
+        )}
+
+        <button
+          aria-pressed={requiresConfirmation}
+          className="flex items-center justify-between gap-3 rounded-lg border border-border/70 px-3 py-2.5 text-left transition-colors hover:bg-muted/50"
+          onClick={() => setRequiresConfirmation((value) => !value)}
+          type="button"
+        >
+          <span className="flex flex-col">
+            <span className="text-sm font-medium">Require confirmation</span>
+            <span className="text-xs text-muted-foreground">
+              {requiresConfirmation
+                ? "Requests wait for your approval"
+                : "Valid slots confirm immediately"}
+            </span>
+          </span>
+          <span
+            className={cn(
+              "relative h-5 w-9 shrink-0 rounded-full transition-colors",
+              requiresConfirmation ? "bg-emerald-500" : "bg-muted-foreground/30"
+            )}
+          >
+            <span
+              className={cn(
+                "absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform",
+                requiresConfirmation ? "translate-x-4" : "translate-x-0.5"
+              )}
+            />
+          </span>
+        </button>
 
         <button
           aria-pressed={active}

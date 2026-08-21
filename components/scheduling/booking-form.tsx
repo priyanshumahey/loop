@@ -9,6 +9,7 @@ import {
   ClockIcon,
   VideoIcon,
 } from "lucide-react"
+import Link from "next/link"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import type {
@@ -16,7 +17,7 @@ import type {
   PublicEventType,
   PublicScheduleSlot,
 } from "@/components/scheduling/types"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -27,7 +28,17 @@ function timeZoneName() {
   return Intl.DateTimeFormat().resolvedOptions().timeZone
 }
 
-export function BookingForm({ eventType }: { eventType: PublicEventType }) {
+export function BookingForm({
+  eventType,
+  rescheduling,
+}: {
+  eventType: PublicEventType
+  rescheduling?: {
+    bookingUid: string
+    managementToken: string
+    currentStart: Date
+  }
+}) {
   const bookingRequest = useRef<{ slot: string; id: string } | null>(null)
   const [windowIndex, setWindowIndex] = useState(0)
   const range = useMemo(() => {
@@ -107,14 +118,25 @@ export function BookingForm({ eventType }: { eventType: PublicEventType }) {
 
     setIsBooking(true)
     setBookingError(null)
-    scheduleApi
-      .bookPublicSlot(eventType.slug, {
+    const bookingInput = {
         start: selectedSlot.start,
         guestName: String(form.get("guestName") ?? ""),
         guestEmail: String(form.get("guestEmail") ?? ""),
         guestNotes: String(form.get("guestNotes") ?? "") || undefined,
+        guestTimeZone: timeZoneName(),
+        guestLocale: navigator.language,
         requestId: bookingRequest.current.id,
-      })
+      }
+    const request = rescheduling
+      ? scheduleApi.reschedulePublicBooking(rescheduling.bookingUid, {
+          managementToken: rescheduling.managementToken,
+          start: bookingInput.start,
+          requestId: bookingInput.requestId,
+          guestTimeZone: bookingInput.guestTimeZone,
+          guestLocale: bookingInput.guestLocale,
+        })
+      : scheduleApi.bookPublicSlot(eventType.slug, bookingInput)
+    request
       .then(setConfirmed)
       .catch((error: unknown) => {
         setBookingError(
@@ -127,11 +149,22 @@ export function BookingForm({ eventType }: { eventType: PublicEventType }) {
   if (confirmed) {
     return (
       <div className="flex min-h-[420px] flex-col items-center justify-center px-6 text-center">
-        <span className="mb-5 grid size-12 place-items-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+        <span className="mb-5 grid size-12 place-items-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
           <CalendarCheckIcon className="size-6" />
         </span>
-        <h2 className="font-heading text-xl font-semibold">You&apos;re booked</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
+        <h2 className="font-heading text-xl font-semibold">
+          {confirmed.status === "pending"
+            ? "Request sent"
+            : rescheduling
+              ? "Booking moved"
+              : "You’re booked"}
+        </h2>
+        {confirmed.status === "pending" && (
+          <p className="mt-2 text-sm text-muted-foreground">
+            The host needs to confirm this time.
+          </p>
+        )}
+        <p className={confirmed.status === "pending" ? "mt-1 text-sm text-muted-foreground" : "mt-2 text-sm text-muted-foreground"}>
           {format(confirmed.start, "EEEE, MMMM d")} at{" "}
           {format(confirmed.start, "h:mm a")}–{format(confirmed.end, "h:mm a")}
         </p>
@@ -142,6 +175,14 @@ export function BookingForm({ eventType }: { eventType: PublicEventType }) {
           </p>
         )}
         <p className="mt-1 text-xs text-muted-foreground">{timeZoneName()}</p>
+        {confirmed.managementToken && (
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }), "mt-5")}
+            href={`/schedule/manage/${confirmed.bookingUid}?token=${encodeURIComponent(confirmed.managementToken)}`}
+          >
+            Manage booking
+          </Link>
+        )}
       </div>
     )
   }
@@ -149,6 +190,11 @@ export function BookingForm({ eventType }: { eventType: PublicEventType }) {
   return (
     <div className="grid min-h-[520px] lg:grid-cols-[minmax(0,1fr)_320px]">
       <div className="min-w-0 border-b border-border/70 p-5 lg:border-r lg:border-b-0">
+        {rescheduling && (
+          <div className="mb-4 rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-xs text-sky-700 dark:text-sky-300">
+            Choose a new time for your {format(rescheduling.currentStart, "MMM d, h:mm a")} booking.
+          </div>
+        )}
         <div className="mb-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-sm font-medium">
             <ClockIcon className="size-4 text-muted-foreground" />
@@ -226,7 +272,7 @@ export function BookingForm({ eventType }: { eventType: PublicEventType }) {
                     className={cn(
                       "h-10 rounded-md border text-sm font-medium tabular-nums transition-colors",
                       selected
-                        ? "border-emerald-600 bg-emerald-600 text-white"
+                        ? "border-primary bg-primary text-primary-foreground"
                         : "border-border hover:border-foreground hover:bg-muted"
                     )}
                     key={slot.start.toISOString()}

@@ -3,6 +3,10 @@ import { z } from "zod"
 
 import { isoDateTimeSchema } from "@/lib/api/route-schemas"
 import { getPublicScheduleSlots } from "@/lib/db/scheduling"
+import {
+  refreshHostAvailability,
+  SLOT_BROWSE_MAX_AGE_SECONDS,
+} from "@/lib/scheduling/availability"
 
 const MAX_RANGE_MS = 31 * 86_400_000
 
@@ -32,6 +36,13 @@ export async function GET(
       { status: 400 }
     )
   }
+
+  await refreshHostAvailability({
+    slug,
+    start: parsed.data.start,
+    end: parsed.data.end,
+    maxAgeSeconds: SLOT_BROWSE_MAX_AGE_SECONDS,
+  })
 
   const result = await getPublicScheduleSlots(slug, parsed.data.start, parsed.data.end)
   if (!result.success) {

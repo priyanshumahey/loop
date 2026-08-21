@@ -21,6 +21,28 @@ export type SchedulingColor =
   | "emerald"
   | "orange"
 
+export type SchedulingLocation = {
+  type: "google_meet" | "link" | "phone" | "in_person"
+  value?: string
+}
+
+export type SchedulingBookingField = {
+  id: string
+  label: string
+  type:
+    | "text"
+    | "textarea"
+    | "phone"
+    | "number"
+    | "select"
+    | "multiselect"
+    | "checkbox"
+    | "radio"
+    | "url"
+  required?: boolean
+  options?: string[]
+}
+
 export interface SchedulingEventType {
   id: string
   title: string
@@ -33,6 +55,14 @@ export interface SchedulingEventType {
   bookingWindowDays: number
   slotIncrementMinutes: number
   location: string | null
+  locations: SchedulingLocation[]
+  bookingFields: SchedulingBookingField[]
+  requiresConfirmation: boolean
+  disableCancelling: boolean
+  disableRescheduling: boolean
+  minimumRescheduleNoticeMinutes: number
+  destinationCalendarId: string
+  successRedirectUrl: string | null
   color: SchedulingColor
   active: boolean
   timezone: string
@@ -45,7 +75,9 @@ export interface PublicEventType {
   description: string | null
   durationMinutes: number
   location: string | null
+  locations: SchedulingLocation[]
   bookingWindowDays: number
+  requiresConfirmation: boolean
 }
 
 export interface PublicScheduleSlot {
@@ -53,9 +85,60 @@ export interface PublicScheduleSlot {
   end: Date
 }
 
-export interface ConfirmedBooking {
-  bookingId: string
-  eventId: string
+export type BookingStatus =
+  | "pending"
+  | "confirmed"
+  | "cancelled"
+  | "rejected"
+  | "rescheduled"
+
+export type ProviderSyncStatus = "pending" | "processing" | "synced" | "failed"
+
+export interface SchedulingBooking {
+  id: string
+  uid: string
+  eventTypeId: string | null
+  title: string
+  description: string | null
   start: Date
   end: Date
+  location: string | null
+  timezone: string
+  status: BookingStatus
+  guestName: string
+  guestEmail: string
+  guestNotes: string | null
+  providerSyncStatus: ProviderSyncStatus
+  providerSyncAttempts: number
+  providerSyncError: string | null
+  providerSyncedAt: string | null
+  createdAt: string
+}
+
+export interface ConfirmedBooking {
+  bookingId: string
+  bookingUid: string
+  managementToken: string | null
+  eventId: string | null
+  start: Date
+  end: Date
+  status: BookingStatus
+}
+
+export interface PublicManagedBooking {
+  bookingUid: string
+  eventTypeSlug: string | null
+  title: string
+  description: string | null
+  start: Date
+  end: Date
+  location: string | null
+  locations: SchedulingLocation[]
+  timezone: string
+  status: BookingStatus
+  guestName: string
+  guestEmail: string
+  canCancel: boolean
+  canReschedule: boolean
+  minimumRescheduleNoticeMinutes: number
 }

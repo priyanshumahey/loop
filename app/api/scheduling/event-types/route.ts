@@ -26,6 +26,41 @@ const weeklyAvailabilitySchema = z
     (rules) => new Set(rules.map((rule) => rule.dayOfWeek)).size === rules.length
   )
 
+const schedulingLocationSchema = z
+  .object({
+    type: z.enum(["google_meet", "link", "phone", "in_person"]),
+    value: z.string().trim().max(500).optional(),
+  })
+  .refine(
+    (location) => location.type === "google_meet" || Boolean(location.value),
+    { message: "Location details are required" }
+  )
+
+const bookingFieldSchema = z
+  .object({
+    id: z.string().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/),
+    label: z.string().trim().min(1).max(120),
+    type: z.enum([
+      "text",
+      "textarea",
+      "phone",
+      "number",
+      "select",
+      "multiselect",
+      "checkbox",
+      "radio",
+      "url",
+    ]),
+    required: z.boolean().optional(),
+    options: z.array(z.string().trim().min(1).max(120)).max(50).optional(),
+  })
+  .refine(
+    (field) =>
+      !["select", "multiselect", "radio"].includes(field.type) ||
+      Boolean(field.options?.length),
+    { message: "Choice fields require options" }
+  )
+
 const eventTypeSchema = z.object({
   id: z.uuid().optional(),
   title: z.string().trim().min(1).max(120),
@@ -50,6 +85,19 @@ const eventTypeSchema = z.object({
     z.literal(60),
   ]),
   location: z.string().trim().max(200).nullable().optional(),
+  locations: z.array(schedulingLocationSchema).min(1).max(5),
+  bookingFields: z
+    .array(bookingFieldSchema)
+    .max(20)
+    .refine(
+      (fields) => new Set(fields.map((field) => field.id)).size === fields.length
+    ),
+  requiresConfirmation: z.boolean(),
+  disableCancelling: z.boolean(),
+  disableRescheduling: z.boolean(),
+  minimumRescheduleNoticeMinutes: z.number().int().min(0).max(43_200),
+  destinationCalendarId: z.string().trim().min(1).max(1024),
+  successRedirectUrl: z.url().max(2048).nullable().optional(),
   color: z.enum(["sky", "amber", "violet", "rose", "emerald", "orange"]),
   active: z.boolean(),
   timezone: timeZoneSchema,

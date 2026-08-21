@@ -1,4 +1,5 @@
 import type {
+  BookingStatus,
   ConfirmedBooking,
   PublicScheduleSlot,
 } from "@/components/scheduling/types"
@@ -13,9 +14,12 @@ interface SerializedSlot {
 
 interface SerializedBooking {
   bookingId: string
-  eventId: string
+  bookingUid: string
+  managementToken: string | null
+  eventId: string | null
   start: string
   end: string
+  status: BookingStatus
 }
 
 /** Open slots for a public booking page, within a range of at most 31 days. */
@@ -51,6 +55,8 @@ export async function bookPublicSlot(
     guestName: string
     guestEmail: string
     guestNotes?: string
+    guestTimeZone: string
+    guestLocale?: string
     requestId: string
   }
 ): Promise<ConfirmedBooking> {
@@ -69,8 +75,65 @@ export async function bookPublicSlot(
 
   return {
     bookingId: result.data.bookingId,
+    bookingUid: result.data.bookingUid,
+    managementToken: result.data.managementToken,
     eventId: result.data.eventId,
     start: new Date(result.data.start),
     end: new Date(result.data.end),
+    status: result.data.status,
+  }
+}
+
+export async function cancelPublicBooking(
+  bookingUid: string,
+  managementToken: string,
+  reason?: string
+): Promise<{ status: BookingStatus }> {
+  const response = await fetch(
+    `${API_BASE}/manage/${encodeURIComponent(bookingUid)}`,
+    {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ managementToken, reason }),
+    }
+  )
+  const result: ApiResponse<{ bookingUid: string; status: BookingStatus }> =
+    await response.json()
+  if (!response.ok || !result.data) {
+    throw new Error(result.error || "Failed to cancel this booking")
+  }
+  return { status: result.data.status }
+}
+
+export async function reschedulePublicBooking(
+  bookingUid: string,
+  input: {
+    managementToken: string
+    start: Date
+    requestId: string
+    guestTimeZone: string
+    guestLocale?: string
+  }
+): Promise<ConfirmedBooking> {
+  const response = await fetch(
+    `${API_BASE}/manage/${encodeURIComponent(bookingUid)}/reschedule`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...input, start: input.start.toISOString() }),
+    }
+  )
+  const result: ApiResponse<SerializedBooking> = await response.json()
+  if (!response.ok || !result.data) {
+    throw new Error(result.error || "Failed to reschedule this booking")
+  }
+  return {
+    bookingId: result.data.bookingId,
+    bookingUid: result.data.bookingUid,
+    managementToken: result.data.managementToken,
+    eventId: result.data.eventId,
+    start: new Date(result.data.start),
+    end: new Date(result.data.end),
+    status: result.data.status,
   }
 }
